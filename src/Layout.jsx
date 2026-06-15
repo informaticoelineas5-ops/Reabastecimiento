@@ -17,8 +17,6 @@ import {
   X,
   ShieldCheck,
   BarChart3,
-  Settings,
-  Plug,
   ShoppingBag,
   Truck,
   ClipboardList,
@@ -30,11 +28,8 @@ import { Button } from "@/components/ui/button";
 const navItems = [
   { name: "Dashboard", page: "Dashboard", icon: LayoutDashboard },
   { name: "Catálogo", page: "Catalog", icon: Package },
-  { name: "Importar Datos", page: "DataImport", icon: Upload, roles: ["admin", "inventario"] },
   { name: "Alertas", page: "Alerts", icon: AlertTriangle },
   { name: "Historial", page: "History", icon: History },
-  { name: "Conectores", page: "Connectors", icon: Plug, roles: ["admin"] },
-  { name: "Config. Importación", page: "ImportConfig", icon: Settings, roles: ["admin"] },
   { name: "Análisis Comparativo", page: "ComparativeAnalysis", icon: BarChart3 },
   { name: "Índices de Ventas", page: "SalesIndexImport", icon: TrendingUp, roles: ["admin", "inventario"] },
   { name: "Ranking Ventas", page: "SalesRanking", icon: TrendingUp, roles: ["admin", "supervisor", "comercial", "inventario"] },
@@ -49,10 +44,18 @@ export default function Layout({ children, currentPageName }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dark, setDark] = useState(false);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const cached = localStorage.getItem("reab_user");
+      return cached ? JSON.parse(cached) : null;
+    } catch { return null; }
+  });
 
   useEffect(() => {
-    base44.auth.me().then(setUser).catch(() => {});
+    base44.auth.me().then(u => {
+      setUser(u);
+      try { localStorage.setItem("reab_user", JSON.stringify(u)); } catch {}
+    }).catch(() => {});
     const saved = localStorage.getItem("theme");
     if (saved === "dark") {
       setDark(true);
@@ -126,7 +129,7 @@ export default function Layout({ children, currentPageName }) {
                 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                 transition-all duration-150
                 ${isActive
-                  ? "bg-sidebar-primary text-primary-foreground shadow-lg shadow-sidebar-primary/25"
+                  ? "bg-sidebar-primary text-primary-foreground shadow-lg shadow-sidebar-primary/25 border-l-[3px] border-white/70"
                   : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                 }
               `}

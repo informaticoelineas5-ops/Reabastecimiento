@@ -32,7 +32,7 @@ export default function SupplierOffers() {
   const fileInputRef = useRef();
 
   const [showImport, setShowImport] = useState(false);
-  const [form, setForm] = useState({ offer_name: "", supplier_name: "", valid_from: "", valid_until: "", default_currency: "USD", exchange_rate: 1, base_currency: "USD", notes: "" });
+  const [form, setForm] = useState({ offer_name: "", supplier_name: "", valid_from: "", valid_until: "", default_currency: "USD", exchange_rate: 1, notes: "" });
   const [parsedRows, setParsedRows] = useState([]);
   const [fileError, setFileError] = useState("");
   const [saving, setSaving] = useState(false);

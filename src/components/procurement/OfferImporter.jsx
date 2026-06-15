@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import * as XLSX from "xlsx";
+import { parsePdfToRows } from "@/utils/pdfParser";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -88,11 +89,42 @@ function detectCol(headers, candidates) {
 
 const NONE = "__none__";
 
+/**
+ * Detecta automáticamente la fila de encabezados buscando la que tiene
+ * más celdas no vacías con texto (y la siguiente fila también tiene datos).
+ * Ignora filas de cabecera corporativa, logos, etc.
+ */
+function detectHeaderRow(rows) {
+  const SEARCH_LIMIT = Math.min(rows.length, 30);
+  let bestIdx = 0;
+  let bestScore = -1;
+
+  for (let i = 0; i < SEARCH_LIMIT; i++) {
+    const row = rows[i];
+    const nonEmpty = row.filter(c => c !== null && c !== undefined && c !== "");
+    // Preferir filas con más celdas y que parezcan encabezados (strings cortos)
+    const textCells = nonEmpty.filter(c => typeof c === "string" && c.length < 60);
+    const score = textCells.length * 2 + nonEmpty.length;
+
+    // La fila siguiente también debe tener datos
+    const nextRow = rows[i + 1] || [];
+    const nextNonEmpty = nextRow.filter(c => c !== null && c !== undefined && c !== "").length;
+
+    if (score > bestScore && nextNonEmpty >= 2) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
 export default function OfferImporter({ offer, onImported }) {
   const [workbook, setWorkbook] = useState(null);
   const [file, setFile] = useState(null);
   const [sheets, setSheets] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState(null);
+  const [allRows, setAllRows] = useState([]);      // todas las filas del sheet
+  const [headerRowIdx, setHeaderRowIdx] = useState(0); // índice de fila de encabezados
   const [headers, setHeaders] = useState([]);
   const [preview, setPreview] = useState([]);
   const [colMap, setColMap] = useState({});
@@ -104,24 +136,56 @@ export default function OfferImporter({ offer, onImported }) {
   const fileRef = useRef();
   const queryClient = useQueryClient();
 
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
     setFile(f);
     setError(null);
     setResult(null);
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const wb = XLSX.read(evt.target.result, { type: "binary" });
-      setWorkbook(wb);
-      setSheets(wb.SheetNames);
-      if (wb.SheetNames.length === 1) {
-        loadSheet(wb, wb.SheetNames[0]);
-      } else {
-        setStep("sheet");
+
+    if (f.name.toLowerCase().endsWith('.pdf')) {
+      // ── PDF path ──
+      try {
+        const buffer = await f.arrayBuffer();
+        const rows   = await parsePdfToRows(buffer);
+        if (rows.length < 2) { setError("No se detectaron filas en el PDF. Verifica que no esté escaneado."); return; }
+        setAllRows(rows);
+        const hIdx = detectHeaderRow(rows);
+        setHeaderRowIdx(hIdx);
+        applyHeaderRow(rows, hIdx);
+        setSelectedSheet("PDF");
+        setWorkbook(null);
+        setStep("map");
+      } catch (err) {
+        setError(`Error al leer el PDF: ${err.message}`);
       }
-    };
-    reader.readAsBinaryString(f);
+    } else {
+      // ── Excel / CSV path ──
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const wb = XLSX.read(evt.target.result, { type: "binary" });
+        setWorkbook(wb);
+        setSheets(wb.SheetNames);
+        if (wb.SheetNames.length === 1) {
+          loadSheet(wb, wb.SheetNames[0]);
+        } else {
+          setStep("sheet");
+        }
+      };
+      reader.readAsBinaryString(f);
+    }
+  };
+
+  const applyHeaderRow = (rows, hIdx) => {
+    const hdrs = rows[hIdx].map((h) => (h || "").toString().trim());
+    setHeaders(hdrs);
+    setPreview(rows.slice(hIdx + 1, hIdx + 21));
+    const map = {};
+    for (const field of SYSTEM_FIELDS) {
+      const idx = detectCol(hdrs, field.candidates);
+      map[field.key] = idx >= 0 ? idx : NONE;
+    }
+    setColMap(map);
   };
 
   const loadSheet = (wb, sheetName) => {
@@ -129,18 +193,17 @@ export default function OfferImporter({ offer, onImported }) {
     const ws = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
     if (rows.length < 2) { setError("La hoja seleccionada no tiene filas de datos."); return; }
-    const hdrs = rows[0].map((h) => (h || "").toString().trim());
-    setHeaders(hdrs);
-    setPreview(rows.slice(1, 5));
-
-    // Auto-detect mappings
-    const map = {};
-    for (const field of SYSTEM_FIELDS) {
-      const idx = detectCol(hdrs, field.candidates);
-      map[field.key] = idx >= 0 ? idx : NONE;
-    }
-    setColMap(map);
+    setAllRows(rows);
+    const hIdx = detectHeaderRow(rows);
+    setHeaderRowIdx(hIdx);
+    applyHeaderRow(rows, hIdx);
     setStep("map");
+  };
+
+  const handleHeaderRowChange = (delta) => {
+    const newIdx = Math.max(0, Math.min(allRows.length - 2, headerRowIdx + delta));
+    setHeaderRowIdx(newIdx);
+    applyHeaderRow(allRows, newIdx);
   };
 
   const handleSheetSelect = (sheetName) => {
@@ -151,9 +214,10 @@ export default function OfferImporter({ offer, onImported }) {
     setImporting(true);
     setProgress(10);
 
-    const ws = workbook.Sheets[selectedSheet];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-    const dataRows = rows.slice(1).filter((r) => r.some((c) => c !== ""));
+    const rows = workbook?.Sheets?.[selectedSheet]
+      ? XLSX.utils.sheet_to_json(workbook.Sheets[selectedSheet], { header: 1, defval: "" })
+      : allRows;
+    const dataRows = rows.slice(headerRowIdx + 1).filter((r) => r.some((c) => c !== ""));
     setProgress(30);
 
     const nameIdx = colMap.supplier_product_name;
@@ -173,7 +237,7 @@ export default function OfferImporter({ offer, onImported }) {
         is_valid: true,
         min_qty: 1,
         pack_multiple: 1,
-        currency: offer.currency || "USD",
+        currency: offer.default_currency || "USD",
       };
 
       for (const field of SYSTEM_FIELDS) {
@@ -244,8 +308,8 @@ export default function OfferImporter({ offer, onImported }) {
         >
           <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
           <p className="text-sm font-medium">Selecciona o arrastra un archivo</p>
-          <p className="text-xs text-muted-foreground">Excel (.xlsx, .xls) o CSV</p>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
+          <p className="text-xs text-muted-foreground">Excel (.xlsx, .xls), CSV o PDF</p>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.pdf" className="hidden" onChange={handleFile} />
         </div>
         {error && <div className="flex items-center gap-2 text-destructive text-sm"><AlertCircle size={14} />{error}</div>}
       </div>
@@ -293,18 +357,27 @@ export default function OfferImporter({ offer, onImported }) {
           <span className="text-sm font-medium">{file.name}</span>
           {selectedSheet && <Badge variant="outline">Hoja: {selectedSheet}</Badge>}
           <Badge variant="secondary">{headers.length} columnas</Badge>
-          <button onClick={() => setStep("sheet")} className="text-xs text-muted-foreground underline ml-auto">
-            Cambiar hoja
-          </button>
+          {/* Selector de fila de encabezados */}
+          <div className="flex items-center gap-1 ml-2 bg-muted rounded-md px-2 py-1">
+            <span className="text-[10px] text-muted-foreground">Encabezados en fila:</span>
+            <button onClick={() => handleHeaderRowChange(-1)} className="text-muted-foreground hover:text-foreground px-1 font-bold">−</button>
+            <span className="text-xs font-mono font-semibold w-5 text-center">{headerRowIdx + 1}</span>
+            <button onClick={() => handleHeaderRowChange(1)} className="text-muted-foreground hover:text-foreground px-1 font-bold">+</button>
+          </div>
+          {!file?.name.toLowerCase().endsWith('.pdf') && (
+            <button onClick={() => setStep("sheet")} className="text-xs text-muted-foreground underline ml-auto">
+              Cambiar hoja
+            </button>
+          )}
         </div>
 
         {/* Preview */}
-        <div className="overflow-x-auto border border-border rounded-lg">
+        <div className="overflow-auto max-h-64 border border-border rounded-lg">
           <table className="w-full text-xs">
             <thead>
               <tr>
                 {headers.map((h, i) => (
-                  <th key={i} className="border-b border-border px-2 py-1.5 bg-muted text-left font-medium whitespace-nowrap">
+                  <th key={i} className="border-b border-border px-2 py-1.5 bg-muted text-left font-medium whitespace-nowrap sticky top-0 z-10">
                     {h || `Col ${i + 1}`}
                   </th>
                 ))}

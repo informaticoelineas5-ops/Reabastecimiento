@@ -1,313 +1,413 @@
-import React, { useState, useRef } from "react";
-import * as XLSX from "xlsx";
-import { base44 } from "@/api/base44Client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import React, { useState, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Upload, FileText, CheckCircle2, AlertCircle, TrendingUp } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TrendingUp, Settings, Save, CheckCircle2, ChevronDown, X } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { fetchSalesIndices } from "@/api/salesIndicesClient";
+import {
+  SELECTABLE_INDICES,
+  DEFAULT_SELECTED_INDICES,
+  getUserPreferences,
+  saveUserPreferences,
+} from "@/api/userPreferencesClient";
+import { fetchAlmacenes, fetchExtSuministradoresMulti } from "@/api/externalSupabaseClient";
 
-// Columnas esperadas del reporte RESUMEN DESPACHOS
-// Fila 0: título; Fila 1: encabezados reales
-// #  | Ident. | Codigo | Nombre | Suministrador | Categoría Online | Ordenes | Cantidad P. | Cantidad | P. Costo | Costo Total | P. Venta | Importe | Ganancia
-
-function parseNumber(val) {
-  if (val === null || val === undefined || val === "") return 0;
-  // Handle Spanish locale: "$ 29,00" → 29.00 (comma = decimal separator)
-  // If there's a comma but no dot → comma is decimal separator
-  // If there's both (e.g. "1.234,56") → dot is thousands, comma is decimal
-  let s = val.toString().trim().replace(/[^0-9.,\-]/g, "");
-  if (s.includes(",") && s.includes(".")) {
-    // e.g. "1.234,56" → remove dot, replace comma with dot
-    s = s.replace(/\./g, "").replace(",", ".");
-  } else if (s.includes(",")) {
-    // e.g. "29,00" → replace comma with dot
-    s = s.replace(",", ".");
-  }
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
+function MultiSelect({ label, options, value, onChange, placeholder, disabled }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <div className="relative">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen(o => !o)}
+          className="w-full h-9 border border-input rounded-md px-3 text-sm text-left flex items-center justify-between bg-background hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-colors"
+        >
+          <span className={value.length === 0 ? "text-muted-foreground" : "font-medium"}>
+            {value.length === 0 ? placeholder : `${value.length} seleccionado(s)`}
+          </span>
+          <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+          <div className="absolute z-50 w-full top-full mt-1.5 border border-border rounded-md bg-popover shadow-md max-h-52 overflow-y-auto">
+            {options.length === 0 && (
+              <p className="px-3 py-3 text-xs text-muted-foreground text-center">Sin opciones disponibles</p>
+            )}
+            {options.map(opt => (
+              <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent cursor-pointer text-sm select-none">
+                <Checkbox
+                  checked={value.includes(opt)}
+                  onCheckedChange={checked =>
+                    onChange(checked ? [...value, opt] : value.filter(v => v !== opt))
+                  }
+                />
+                <span className="truncate">{opt}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {value.map(v => (
+            <Badge key={v} variant="secondary" className="text-[10px] gap-1 pl-2 pr-1">
+              <span className="truncate max-w-[160px]">{v}</span>
+              <button onClick={() => onChange(value.filter(x => x !== v))} className="ml-0.5 hover:text-destructive rounded-sm">
+                <X size={10} />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-export default function SalesIndexImport() {
-  const [file, setFile] = useState(null);
-  const [period, setPeriod] = useState("");
-  const [preview, setPreview] = useState([]);
-  const [dataRows, setDataRows] = useState([]);
-  const [importing, setImporting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const fileRef = useRef();
-  const queryClient = useQueryClient();
+export default function SalesIndexConfig() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const handleFile = (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    setFile(f);
-    setError(null);
-    setResult(null);
+  const [selectedAlmacenes, setSelectedAlmacenes] = useState([]);
+  const [selectedSuministradores, setSelectedSuministradores] = useState([]);
+  const [selectedIndices, setSelectedIndices] = useState(DEFAULT_SELECTED_INDICES);
+  const [saving, setSaving] = useState(false);
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const wb = XLSX.read(evt.target.result, { type: "binary" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      // sheet_to_json with header:1 returns all rows as arrays
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-
-      // Find the header row: look for a row containing "Ident." or "Ident" 
-      let headerIdx = -1;
-      for (let i = 0; i < Math.min(rows.length, 5); i++) {
-        const row = rows[i].map(c => c.toString().toLowerCase());
-        if (row.some(c => c.includes("ident"))) {
-          headerIdx = i;
-          break;
+  // Load user preferences on mount
+  useEffect(() => {
+    getUserPreferences()
+      .then((prefs) => {
+        if (prefs?.selected_indices?.length) {
+          setSelectedIndices(prefs.selected_indices);
         }
-      }
-      if (headerIdx === -1) {
-        setError("No se encontró la fila de encabezados (se busca columna 'Ident.')");
-        return;
-      }
+        if (prefs?.almacenes?.length) {
+          setSelectedAlmacenes(prefs.almacenes);
+        } else if (prefs?.almacen) {
+          setSelectedAlmacenes([prefs.almacen]);
+        }
+        if (prefs?.suministradores?.length) {
+          setSelectedSuministradores(prefs.suministradores);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
-      const headers = rows[headerIdx].map(h => (h || "").toString().trim());
-      const lh = headers.map(h => h.toLowerCase());
+  // Query almacenes
+  const { data: almacenes = [] } = useQuery({
+    queryKey: ["ext-almacenes"],
+    queryFn: fetchAlmacenes,
+    staleTime: 10 * 60 * 1000,
+  });
 
-      const idxIdent = lh.findIndex(h => h.includes("ident"));
-      const idxCodigo = lh.findIndex(h => h === "codigo" || h === "código");
-      const idxNombre = lh.findIndex(h => h === "nombre");
-      const idxSumin = lh.findIndex(h => h.includes("suministrador"));
-      const idxCatOnline = lh.findIndex(h => h.includes("categoría") || h.includes("categoria") || h.includes("categor"));
-      const idxOrdenes = lh.findIndex(h => h.includes("ordenes") || h.includes("órdenes"));
-      const idxCantidad = lh.findIndex(h => h === "cantidad");
-      const idxCostoTotal = lh.findIndex(h => h.includes("costo total"));
-      const idxImporte = lh.findIndex(h => h === "importe");
-      const idxGanancia = lh.findIndex(h => h.includes("ganancia"));
+  // Query suministradores for selected almacenes
+  const { data: suministradoresDisponibles } = useQuery({
+    queryKey: ["ext-sumi-multi", selectedAlmacenes],
+    queryFn: () => fetchExtSuministradoresMulti(selectedAlmacenes),
+    enabled: selectedAlmacenes.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
 
-      if (idxIdent === -1) {
-        setError("No se encontró la columna 'Ident.' en el archivo.");
-        return;
-      }
+  // When selectedAlmacenes changes, filter out suministradores that are no longer valid
+  useEffect(() => {
+    if (!suministradoresDisponibles) return; // query disabled or loading — skip
+    if (suministradoresDisponibles.length > 0) {
+      setSelectedSuministradores(prev =>
+        prev.filter(s => suministradoresDisponibles.includes(s))
+      );
+    } else if (selectedAlmacenes.length === 0) {
+      setSelectedSuministradores([]);
+    }
+  }, [suministradoresDisponibles, selectedAlmacenes.length]);
 
-      const parsed = [];
-      for (let i = headerIdx + 1; i < rows.length; i++) {
-        const row = rows[i];
-        const ident = (row[idxIdent] || "").toString().trim();
-        if (!ident || ident === "#") continue;
+  // Sales map query
+  const { data: salesMap = new Map(), isLoading: loadingSales } = useQuery({
+    queryKey: ["sales-indices-db"],
+    queryFn: fetchSalesIndices,
+    staleTime: 30 * 60 * 1000,
+  });
 
-        parsed.push({
-          tienda_internal_id: ident,
-          codigo: idxCodigo >= 0 ? (row[idxCodigo] || "").toString().trim() : "",
-          nombre: idxNombre >= 0 ? (row[idxNombre] || "").toString().trim() : "",
-          suministrador: idxSumin >= 0 ? (row[idxSumin] || "").toString().trim() : "",
-          categoria_online: idxCatOnline >= 0 ? (row[idxCatOnline] || "").toString().trim() : "",
-          total_ordenes: idxOrdenes >= 0 ? parseNumber(row[idxOrdenes]) : 0,
-          total_cantidad: idxCantidad >= 0 ? parseNumber(row[idxCantidad]) : 0,
-          costo_total: idxCostoTotal >= 0 ? parseNumber(row[idxCostoTotal]) : 0,
-          importe_total: idxImporte >= 0 ? parseNumber(row[idxImporte]) : 0,
-          ganancia_total: idxGanancia >= 0 ? parseNumber(row[idxGanancia]) : 0,
-        });
-      }
+  // Build top 200 rows sorted by indiceAvg desc
+  const tableRows = useMemo(() => {
+    const rows = [];
+    for (const [id, entry] of salesMap.entries()) {
+      rows.push({ id_tienda: id, ...entry });
+    }
+    rows.sort((a, b) => {
+      if (a.indiceAvg == null && b.indiceAvg == null) return 0;
+      if (a.indiceAvg == null) return 1;
+      if (b.indiceAvg == null) return -1;
+      return b.indiceAvg - a.indiceAvg;
+    });
+    return rows.slice(0, 200);
+  }, [salesMap]);
 
-      setDataRows(parsed);
-      setPreview(parsed.slice(0, 5));
-    };
-    reader.readAsBinaryString(f);
+  const totalProducts = salesMap.size;
+
+  const handleToggleIndex = (key) => {
+    setSelectedIndices((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
   };
 
-  const handleImport = async () => {
-    if (dataRows.length === 0) return;
-    if (!period.trim()) {
-      setError("El período es obligatorio para mantener el historial. Ejemplo: 2025-01 o Enero 2025");
-      return;
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await saveUserPreferences({
+        almacenes: selectedAlmacenes,
+        suministradores: selectedSuministradores,
+        selected_indices: selectedIndices,
+      });
+      queryClient.invalidateQueries({ queryKey: ["user-preferences"] });
+      toast({
+        title: "Configuración guardada",
+        description: "Tus preferencias de almacenes, suministradores e índices han sido guardadas.",
+        duration: 3000,
+      });
+    } catch (err) {
+      toast({
+        title: "Error al guardar",
+        description: err?.message ?? "No se pudo guardar la configuración.",
+        variant: "destructive",
+        duration: 4000,
+      });
+    } finally {
+      setSaving(false);
     }
-    setImporting(true);
-    setProgress(5);
-
-    const now = new Date().toISOString();
-    const periodLabel = period.trim();
-    // Extract YYYY-MM key for deduplication (try to parse, else use label as key)
-    const periodoFecha = (() => {
-      // Accept formats: "2025-01", "Enero 2025", "enero 2025", "01/2025"
-      const iso = periodLabel.match(/^(\d{4})-(\d{2})$/);
-      if (iso) return periodLabel;
-      const slashFmt = periodLabel.match(/^(\d{2})\/(\d{4})$/);
-      if (slashFmt) return `${slashFmt[2]}-${slashFmt[1]}`;
-      // month name + year
-      const months = { enero:"01",febrero:"02",marzo:"03",abril:"04",mayo:"05",junio:"06",julio:"07",agosto:"08",septiembre:"09",octubre:"10",noviembre:"11",diciembre:"12" };
-      const parts = periodLabel.toLowerCase().match(/([a-záéíóúñ]+)\s+(\d{4})/);
-      if (parts && months[parts[1]]) return `${parts[2]}-${months[parts[1]]}`;
-      return periodLabel; // fallback: use as-is
-    })();
-
-    // Aggregate by tienda_internal_id (same product can appear in multiple orders)
-    const aggregated = {};
-    for (const row of dataRows) {
-      const key = row.tienda_internal_id;
-      if (!aggregated[key]) {
-        aggregated[key] = { ...row };
-      } else {
-        aggregated[key].total_ordenes += row.total_ordenes;
-        aggregated[key].total_cantidad += row.total_cantidad;
-        aggregated[key].costo_total += row.costo_total;
-        aggregated[key].importe_total += row.importe_total;
-        aggregated[key].ganancia_total += row.ganancia_total;
-      }
-    }
-
-    const records = Object.values(aggregated).map(r => ({
-      tienda_internal_id: r.tienda_internal_id,
-      codigo: r.codigo,
-      nombre: r.nombre,
-      suministrador: r.suministrador,
-      categoria_online: r.categoria_online,
-      total_ordenes: r.total_ordenes,
-      total_cantidad: r.total_cantidad,
-      costo_total: Math.round(r.costo_total * 100) / 100,
-      importe_total: Math.round(r.importe_total * 100) / 100,
-      ganancia_total: Math.round(r.ganancia_total * 100) / 100,
-      periodo: periodLabel,
-      periodo_fecha: periodoFecha,
-      imported_at: now,
-    }));
-
-    setProgress(20);
-
-    // Only replace records for this exact period_fecha
-    const existing = await base44.entities.SalesIndex.filter({ periodo_fecha: periodoFecha });
-    if (existing.length > 0) {
-      for (let i = 0; i < existing.length; i += 50) {
-        const batch = existing.slice(i, i + 50);
-        await Promise.all(batch.map(r => base44.entities.SalesIndex.delete(r.id)));
-      }
-    }
-
-    setProgress(40);
-
-    const BATCH = 50;
-    for (let i = 0; i < records.length; i += BATCH) {
-      await base44.entities.SalesIndex.bulkCreate(records.slice(i, i + BATCH));
-      setProgress(40 + Math.round(((i + BATCH) / records.length) * 55));
-    }
-
-    setProgress(100);
-    setResult({ total: dataRows.length, unique: records.length, period: periodLabel });
-    queryClient.invalidateQueries({ queryKey: ["sales-index"] });
-    setImporting(false);
-    toast({ title: "Índices importados", description: `${records.length} productos con índices de ventas.` });
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <TrendingUp className="text-primary" size={24} />
-          Importar Índices de Ventas
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Carga el reporte <strong>RESUMEN DESPACHOS - Productos</strong>. Los índices se cotejan por ID de tienda con el catálogo interno.
-        </p>
-      </div>
-
-      <div className="bg-card border border-border rounded-xl p-6 space-y-4">
-        <div>
-          <label className="text-sm font-medium block mb-1">Período (etiqueta)</label>
-          <Input
-            placeholder="Ej: 2025-01 o Enero 2025"
-            value={period}
-            onChange={(e) => { setPeriod(e.target.value); setError(null); }}
-            className="w-64"
-          />
-          <p className="text-xs text-muted-foreground mt-1">Obligatorio. Permite crear historial acumulado. Mismo período = reemplaza ese mes.</p>
+    <div className="p-4 md:p-6 space-y-6 max-w-[1400px] mx-auto">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Settings size={18} className="text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <TrendingUp size={18} className="text-primary" />
+              Configuración de Índices de Ventas
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Personaliza tus almacenes, suministradores e índices visibles en el Catálogo.
+            </p>
+          </div>
         </div>
-
-        <div
-          className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
-          onClick={() => fileRef.current?.click()}
-        >
-          <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-          <p className="text-sm font-medium">Selecciona el archivo Excel de despachos</p>
-          <p className="text-xs text-muted-foreground">RESUMEN DESPACHOS - Productos (.xlsx)</p>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
-        </div>
-
-        {file && (
-          <div className="flex items-center gap-2 text-sm">
-            <FileText size={15} className="text-primary" />
-            <span className="font-medium">{file.name}</span>
-            {dataRows.length > 0 && <Badge variant="secondary">{dataRows.length} filas leídas · {Object.keys(
-              dataRows.reduce((a, r) => { a[r.tienda_internal_id] = 1; return a; }, {})
-            ).length} productos únicos</Badge>}
-          </div>
-        )}
-
-        {error && <div className="flex items-center gap-2 text-destructive text-sm"><AlertCircle size={14} />{error}</div>}
-
-        {preview.length > 0 && (
-          <div className="overflow-x-auto border border-border rounded-lg">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-muted border-b border-border">
-                  <th className="px-3 py-2 text-left font-medium">ID Tienda</th>
-                  <th className="px-3 py-2 text-left font-medium">Nombre</th>
-                  <th className="px-3 py-2 text-right font-medium">Órdenes</th>
-                  <th className="px-3 py-2 text-right font-medium">Cantidad</th>
-                  <th className="px-3 py-2 text-right font-medium">Importe</th>
-                  <th className="px-3 py-2 text-right font-medium">Ganancia</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.map((r, i) => (
-                  <tr key={i} className="border-b border-border/50 last:border-0">
-                    <td className="px-3 py-1.5 font-mono text-primary">{r.tienda_internal_id}</td>
-                    <td className="px-3 py-1.5 max-w-[200px] truncate">{r.nombre}</td>
-                    <td className="px-3 py-1.5 text-right">{r.total_ordenes}</td>
-                    <td className="px-3 py-1.5 text-right">{r.total_cantidad}</td>
-                    <td className="px-3 py-1.5 text-right">${r.importe_total.toFixed(2)}</td>
-                    <td className="px-3 py-1.5 text-right text-success">${r.ganancia_total.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {importing && (
-          <div className="space-y-1.5">
-            <Progress value={progress} />
-            <p className="text-xs text-center text-muted-foreground">Importando... {progress}%</p>
-          </div>
-        )}
-
-        {result && (
-          <div className="bg-success/10 rounded-lg p-4 space-y-2">
-            <div className="flex items-center gap-2 text-success font-semibold">
-              <CheckCircle2 size={18} /> Importación completada — {result.period}
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div><span className="text-muted-foreground">Filas leídas:</span> <strong>{result.total}</strong></div>
-              <div><span className="text-muted-foreground">Productos únicos:</span> <strong>{result.unique}</strong></div>
-            </div>
-          </div>
-        )}
-
-        {dataRows.length > 0 && !importing && !result && (
-          <Button onClick={handleImport} className="w-full">
-            <Upload size={15} className="mr-2" />
-            Importar {dataRows.length} registros → {Object.keys(
-              dataRows.reduce((a, r) => { a[r.tienda_internal_id] = 1; return a; }, {})
-            ).length} productos únicos
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-xs flex items-center gap-1.5">
+            {loadingSales ? (
+              <><div className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-current border-t-transparent" />Cargando índices...</>
+            ) : (
+              `${totalProducts.toLocaleString()} productos en índices`
+            )}
+          </Badge>
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving ? (
+              <>
+                <CheckCircle2 size={14} className="mr-1.5 animate-pulse" />
+                Guardando...
+              </>
+            ) : (
+              <>
+                <Save size={14} className="mr-1.5" />
+                Guardar configuración
+              </>
+            )}
           </Button>
-        )}
+        </div>
       </div>
 
-      <div className="bg-muted/40 border border-border rounded-xl p-4 text-xs text-muted-foreground space-y-1">
-        <p className="font-semibold text-foreground">¿Cómo funciona el cruce?</p>
-        <p>• El archivo debe tener la columna <strong>Ident.</strong> con el ID de la tienda.</p>
-        <p>• Los productos del catálogo que tengan ese mismo <strong>ID de tienda</strong> mostrarán sus índices de ventas.</p>
-        <p>• Productos sin ID de tienda aparecerán como <strong>"Producto nuevo sin ventas"</strong>.</p>
-        <p>• Cada importación <strong>reemplaza</strong> los índices anteriores.</p>
+      {/* Three-card grid */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {/* Card 1: Almacenes */}
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">Almacenes</h2>
+            {selectedAlmacenes.length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                {selectedAlmacenes.length}
+              </Badge>
+            )}
+          </div>
+          <MultiSelect
+            label="Selecciona los almacenes que gestionas"
+            options={almacenes}
+            value={selectedAlmacenes}
+            onChange={setSelectedAlmacenes}
+            placeholder="Selecciona almacenes..."
+          />
+          <p className="text-xs text-muted-foreground">
+            Estos almacenes aparecerán en el Catálogo y Ranking de Ventas.
+          </p>
+        </div>
+
+        {/* Card 2: Suministradores */}
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">Suministradores</h2>
+            {selectedSuministradores.length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                {selectedSuministradores.length}
+              </Badge>
+            )}
+          </div>
+          <MultiSelect
+            label="Filtra por suministrador (opcional)"
+            options={suministradoresDisponibles ?? []}
+            value={selectedSuministradores}
+            onChange={setSelectedSuministradores}
+            placeholder={selectedAlmacenes.length === 0 ? "Selecciona almacenes primero" : "Todos los suministradores"}
+            disabled={selectedAlmacenes.length === 0}
+          />
+          <p className="text-xs text-muted-foreground">
+            Deja vacío para ver todos los suministradores de los almacenes seleccionados.
+          </p>
+        </div>
+
+        {/* Card 3: Índices visibles */}
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Índices visibles en Catálogo</h2>
+            <Badge variant="secondary" className="text-xs">
+              {selectedIndices.length} / {SELECTABLE_INDICES.length} seleccionados
+            </Badge>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {SELECTABLE_INDICES.map(({ key, label, short }) => (
+              <div key={key} className="flex items-center gap-2">
+                <Checkbox
+                  id={`idx-${key}`}
+                  checked={selectedIndices.includes(key)}
+                  onCheckedChange={() => handleToggleIndex(key)}
+                />
+                <Label
+                  htmlFor={`idx-${key}`}
+                  className="text-xs cursor-pointer leading-tight"
+                  title={label}
+                >
+                  <span className="font-mono text-primary mr-1">{short}</span>
+                  <span className="text-muted-foreground">{label}</span>
+                </Label>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Data table: top 200 products sorted by indiceAvg desc */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            {loadingSales ? (
+              <><div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />Vista previa — Cargando datos...</>
+            ) : (
+              `Vista previa — Top ${tableRows.length} productos por I.AVG`
+            )}
+          </h2>
+          {salesMap.size > 200 && (
+            <span className="text-xs text-muted-foreground">
+              Mostrando 200 de {salesMap.size.toLocaleString()} productos
+            </span>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/50 border-b border-border">
+                <th className="px-3 py-2 text-left font-medium sticky left-0 bg-muted/50 z-10 whitespace-nowrap">
+                  ID Tienda
+                </th>
+                <th className="px-3 py-2 text-center font-medium">Cat.V</th>
+                <th className="px-3 py-2 text-right font-medium">I.AVG</th>
+                {SELECTABLE_INDICES.map(({ key, short, label }) => (
+                  <th
+                    key={key}
+                    className={`px-3 py-2 text-right font-medium whitespace-nowrap transition-opacity ${
+                      selectedIndices.includes(key) ? "opacity-100" : "opacity-30"
+                    }`}
+                    title={label}
+                  >
+                    {short}
+                    {selectedIndices.includes(key) && (
+                      <span className="ml-0.5 text-chart-2">✓</span>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((row) => (
+                <tr
+                  key={row.id_tienda}
+                  className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors"
+                >
+                  <td className="px-3 py-1.5 font-mono text-primary sticky left-0 bg-card z-10">
+                    {row.id_tienda}
+                  </td>
+                  <td className="px-3 py-1.5 text-center">
+                    {row.categoriaVentas != null ? (
+                      <Badge
+                        className={`text-[10px] ${
+                          row.categoriaVentas === "A"
+                            ? "bg-chart-2/15 text-chart-2"
+                            : row.categoriaVentas === "B"
+                            ? "bg-chart-3/15 text-chart-3"
+                            : row.categoriaVentas === "C"
+                            ? "bg-info/15 text-info"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {row.categoriaVentas}
+                      </Badge>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono">
+                    {row.indiceAvg != null ? row.indiceAvg.toFixed(3) : "—"}
+                  </td>
+                  {SELECTABLE_INDICES.map(({ key }) => (
+                    <td
+                      key={key}
+                      className={`px-3 py-1.5 text-right font-mono transition-opacity ${
+                        selectedIndices.includes(key) ? "opacity-100" : "opacity-30"
+                      }`}
+                    >
+                      {row[key] != null ? Number(row[key]).toFixed(3) : "—"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {tableRows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={3 + SELECTABLE_INDICES.length}
+                    className="text-center text-muted-foreground py-12"
+                  >
+                    {loadingSales ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        <span>Cargando índices de ventas...</span>
+                      </div>
+                    ) : (
+                      "No hay datos de índices disponibles."
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {salesMap.size > 200 && (
+          <div className="px-4 py-2 border-t border-border bg-muted/30 text-xs text-muted-foreground">
+            Mostrando los primeros 200 productos ordenados por I.AVG descendente. Total:{" "}
+            {salesMap.size.toLocaleString()} productos con índices.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Upload, Package, Link2, ShoppingCart, CheckCircle2, Clock, AlertCircle } from "lucide-react";
+import { ArrowLeft, Upload, Package, Link2, ShoppingCart, CheckCircle2, Clock, AlertCircle, Search, Loader2 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -15,6 +15,8 @@ import OfferImporter from "@/components/procurement/OfferImporter";
 import ProductMatcher from "@/components/procurement/ProductMatcher";
 import ProposalTable from "@/components/procurement/ProposalTable";
 import { useProcurementUser } from "@/hooks/useProcurementUser";
+import { getUserPreferences } from "@/api/userPreferencesClient";
+import { fetchProductsForAlmacen, fetchProductsByIdOnlines } from "@/api/externalSupabaseClient";
 
 const STATUS_OPTS = ["draft","imported","partially_matched","fully_matched","ordered","expired","archived"];
 const STATUS_LABELS = { draft:"Borrador", imported:"Importada", partially_matched:"Asoc. parcial", fully_matched:"Asociada completa", ordered:"Con pedido", expired:"Vencida", archived:"Archivada" };
@@ -25,6 +27,7 @@ export default function SupplierOfferDetail() {
   const id = window.location.pathname.split("/").pop();
   const { isAdmin } = useProcurementUser();
   const queryClient = useQueryClient();
+  const [matchingSearch, setMatchingSearch] = useState("");
 
   const { data: offer, isLoading: loadingOffer } = useQuery({
     queryKey: ["supplier-offer", id],
@@ -44,16 +47,54 @@ export default function SupplierOfferDetail() {
     enabled: !!id,
   });
 
-  const { data: internalOffers = [] } = useQuery({
-    queryKey: ["offers-for-matching"],
-    queryFn: () => base44.entities.Offer.list("-updated_date", 500),
-    staleTime: 120000,
+  // Almacenes configurados por el usuario
+  const { data: userPrefs } = useQuery({
+    queryKey: ["user-preferences"],
+    queryFn: getUserPreferences,
+    staleTime: 5 * 60 * 1000,
   });
+  const userAlmacenes = userPrefs?.almacenes?.length
+    ? userPrefs.almacenes
+    : (userPrefs?.almacen ? [userPrefs.almacen] : []);
+
+  // Todos los productos del catálogo (ELINEAS_DB) para los almacenes del usuario
+  const { data: productsMap = new Map(), isLoading: loadingProducts } = useQuery({
+    queryKey: ["ext-products-for-matching", userAlmacenes],
+    queryFn: async () => {
+      if (!userAlmacenes.length) return new Map();
+      const maps = await Promise.all(userAlmacenes.map(a => fetchProductsForAlmacen(a)));
+      const merged = new Map();
+      maps.forEach(m => m.forEach((v, k) => merged.set(k, v)));
+      return merged;
+    },
+    enabled: userAlmacenes.length > 0,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Derivar confirmados antes de los early returns (matches defaultea a [])
+  const confirmedMatches = matches.filter(m => m.status === "confirmed");
+  const matchedIdOnlines = confirmedMatches.map(m => m.internal_offer_id).filter(Boolean);
+
+  // Fetch por id_online exacto — garantiza stock correcto sin importar el almacén
+  const { data: matchedProductsList = [] } = useQuery({
+    queryKey: ["matched-products-by-id", [...matchedIdOnlines].sort().join(",")],
+    queryFn: () => fetchProductsByIdOnlines(matchedIdOnlines),
+    enabled: matchedIdOnlines.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Mapa fusionado: productsMap del usuario + productos específicos de los matches
+  const mergedProductsMap = useMemo(() => {
+    const merged = new Map(productsMap);
+    matchedProductsList.forEach(p => {
+      if (p.id_online != null) merged.set(String(p.id_online), p);
+    });
+    return merged;
+  }, [productsMap, matchedProductsList]);
 
   if (loadingOffer) return <div className="p-6 space-y-3"><Skeleton className="h-8 w-64" /><Skeleton className="h-[400px] w-full" /></div>;
   if (!offer) return <div className="p-6 text-muted-foreground">Oferta no encontrada.</div>;
 
-  const confirmedMatches = matches.filter(m => m.status === "confirmed");
   const pendingItems = items.filter(item => !confirmedMatches.find(m => m.offer_item_id === item.id));
   const matchPct = items.length > 0 ? Math.round((confirmedMatches.length / items.length) * 100) : 0;
   const today = new Date().toISOString().slice(0, 10);
@@ -78,7 +119,7 @@ export default function SupplierOfferDetail() {
             <span className="text-sm text-muted-foreground">{offer.supplier_name}</span>
             <Badge variant="secondary" className="text-xs">{STATUS_LABELS[offer.status] || offer.status}</Badge>
             {isExpired && <Badge variant="outline" className="text-xs text-warning border-warning">Vencida</Badge>}
-            <Badge variant="outline" className="text-xs">{offer.currency || "USD"}{offer.exchange_rate && offer.exchange_rate !== 1 ? ` · TC: ${offer.exchange_rate}` : ""}</Badge>
+            <Badge variant="outline" className="text-xs">{offer.default_currency || "USD"}{offer.exchange_rate && offer.exchange_rate !== 1 ? ` · TC: ${offer.exchange_rate}` : ""}</Badge>
           </div>
         </div>
         {isAdmin && (
@@ -113,8 +154,22 @@ export default function SupplierOfferDetail() {
       <Tabs defaultValue={items.length === 0 ? "import" : "items"}>
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="import" className="text-xs"><Upload size={13} className="mr-1" /> Importar</TabsTrigger>
-          <TabsTrigger value="items" className="text-xs"><Package size={13} className="mr-1" /> Ítems ({items.length})</TabsTrigger>
-          <TabsTrigger value="matching" className="text-xs"><Link2 size={13} className="mr-1" /> Asociación ({confirmedMatches.length}/{items.length})</TabsTrigger>
+          <TabsTrigger value="items" className="text-xs">
+            <Package size={13} className="mr-1" />
+            Ítems{" "}
+            {loadingItems
+              ? <Loader2 size={11} className="animate-spin ml-0.5" />
+              : `(${items.length})`
+            }
+          </TabsTrigger>
+          <TabsTrigger value="matching" className="text-xs">
+            <Link2 size={13} className="mr-1" />
+            Asociación{" "}
+            {loadingItems
+              ? <Loader2 size={11} className="animate-spin ml-0.5" />
+              : `(${confirmedMatches.length}/${items.length})`
+            }
+          </TabsTrigger>
           <TabsTrigger value="proposal" className="text-xs"><ShoppingCart size={13} className="mr-1" /> Propuesta & Pedido</TabsTrigger>
         </TabsList>
 
@@ -134,82 +189,113 @@ export default function SupplierOfferDetail() {
         {/* Items Tab */}
         <TabsContent value="items">
           <Card className="p-4">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    {["#", "Código Proveedor", "Nombre", "Formato", "Unidad", "Precio", "Mín", "Múltiplo", "Disponibilidad", "Entrega (días)", "Estado"].map(h => (
-                      <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.length === 0 ? (
-                    <tr><td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">Sin ítems. Importa un archivo.</td></tr>
-                  ) : items.map((item) => {
-                    const match = confirmedMatches.find(m => m.offer_item_id === item.id);
-                    return (
-                      <tr key={item.id} className="border-b border-border/50 hover:bg-muted/30">
-                        <td className="px-3 py-2 text-muted-foreground">{item.row_number}</td>
-                        <td className="px-3 py-2 font-mono">{item.supplier_product_code || "—"}</td>
-                        <td className="px-3 py-2 max-w-[200px]"><span className="truncate block">{item.supplier_product_name}</span></td>
-                        <td className="px-3 py-2">{item.format || "—"}</td>
-                        <td className="px-3 py-2">{item.unit || "—"}</td>
-                        <td className="px-3 py-2 font-semibold">{item.currency || offer.currency} {item.offered_cost?.toFixed(2) || "—"}</td>
-                        <td className="px-3 py-2">{item.min_qty || 1}</td>
-                        <td className="px-3 py-2">{item.pack_multiple || 1}</td>
-                        <td className="px-3 py-2">{item.availability || "—"}</td>
-                        <td className="px-3 py-2">{item.lead_time_days || "—"}</td>
-                        <td className="px-3 py-2">
-                          {match ? (
-                            <Badge variant="outline" className="text-[10px] text-success border-success">{match.internal_product_code}</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] text-muted-foreground">Sin asociar</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {loadingItems ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3 text-muted-foreground">
+                <Loader2 size={24} className="animate-spin text-primary" />
+                <p className="text-sm">Cargando ítems de la oferta...</p>
+              </div>
+            ) : (
+              <div className="overflow-auto max-h-[65vh]">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      {["#", "Código Proveedor", "Nombre", "Formato", "Unidad", "Precio", "Mín", "Múltiplo", "Disponibilidad", "Entrega (días)", "Estado"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap sticky top-0 bg-muted/80 backdrop-blur-sm z-10">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.length === 0 ? (
+                      <tr><td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">Sin ítems. Importa un archivo desde la pestaña <strong>Importar</strong>.</td></tr>
+                    ) : items.map((item) => {
+                      const match = confirmedMatches.find(m => m.offer_item_id === item.id);
+                      return (
+                        <tr key={item.id} className="border-b border-border/50 hover:bg-muted/30">
+                          <td className="px-3 py-2 text-muted-foreground">{item.row_number}</td>
+                          <td className="px-3 py-2 font-mono">{item.supplier_product_code || "—"}</td>
+                          <td className="px-3 py-2 max-w-[200px]"><span className="truncate block">{item.supplier_product_name}</span></td>
+                          <td className="px-3 py-2">{item.format || "—"}</td>
+                          <td className="px-3 py-2">{item.unit || "—"}</td>
+                          <td className="px-3 py-2 font-semibold">{item.currency || offer.default_currency || "USD"} {item.offered_cost?.toFixed(2) || "—"}</td>
+                          <td className="px-3 py-2">{item.min_qty || 1}</td>
+                          <td className="px-3 py-2">{item.pack_multiple || 1}</td>
+                          <td className="px-3 py-2">{item.availability || "—"}</td>
+                          <td className="px-3 py-2">{item.lead_time_days || "—"}</td>
+                          <td className="px-3 py-2">
+                            {match ? (
+                              <Badge variant="outline" className="text-[10px] text-success border-success">{match.internal_product_code}</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">Sin asociar</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         </TabsContent>
 
         {/* Matching Tab */}
         <TabsContent value="matching">
-          <Card className="p-4 space-y-1">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold">Asociar ítems con productos internos</h3>
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Asociar ítems con productos del catálogo</h3>
               <Badge variant="secondary" className="text-xs">{confirmedMatches.length}/{items.length} asociados</Badge>
             </div>
-            {items.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">Importa ítems primero.</p>
-            ) : (
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-                {items.map((item) => {
-                  const match = matches.find(m => m.offer_item_id === item.id && m.status === "confirmed");
-                  return (
-                    <div key={item.id} className="border border-border rounded-lg p-3 space-y-2">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            {match ? <CheckCircle2 size={13} className="text-success shrink-0" /> : <AlertCircle size={13} className="text-warning shrink-0" />}
-                            <span className="text-xs font-semibold">{item.supplier_product_name}</span>
-                            {item.supplier_product_code && <Badge variant="secondary" className="text-[10px]">{item.supplier_product_code}</Badge>}
-                          </div>
-                          <p className="text-[10px] text-muted-foreground ml-5">{item.currency || offer.currency} {item.offered_cost?.toFixed(2)} · Mín: {item.min_qty} · Múlt: {item.pack_multiple}</p>
-                        </div>
-                      </div>
-                      <ProductMatcher
-                        offerItem={item}
-                        existingMatch={match}
-                        onMatched={() => queryClient.invalidateQueries({ queryKey: ["offer-matches", id] })}
-                      />
-                    </div>
-                  );
-                })}
+            {loadingItems ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3 text-muted-foreground">
+                <Loader2 size={24} className="animate-spin text-primary" />
+                <p className="text-sm">Cargando ítems de la oferta...</p>
               </div>
+            ) : items.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">Importa ítems primero desde la pestaña <strong>Importar</strong>.</p>
+            ) : (
+              <>
+                {/* Buscador de ítems */}
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-2 text-muted-foreground" />
+                  <input
+                    value={matchingSearch}
+                    onChange={e => setMatchingSearch(e.target.value)}
+                    placeholder={`Filtrar entre ${items.length} ítems por nombre o código...`}
+                    className="w-full pl-8 h-8 text-xs border border-input rounded-md bg-background px-3 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                  {items
+                    .filter(item => {
+                      const q = matchingSearch.toLowerCase().trim();
+                      if (!q) return true;
+                      return (item.supplier_product_name || "").toLowerCase().includes(q) ||
+                             (item.supplier_product_code || "").toLowerCase().includes(q);
+                    })
+                    .map((item) => {
+                      const match = matches.find(m => m.offer_item_id === item.id && m.status === "confirmed");
+                      return (
+                        <div key={item.id} className="border border-border rounded-lg p-3 space-y-2">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                {match ? <CheckCircle2 size={13} className="text-success shrink-0" /> : <AlertCircle size={13} className="text-warning shrink-0" />}
+                                <span className="text-xs font-semibold">{item.supplier_product_name}</span>
+                                {item.supplier_product_code && <Badge variant="secondary" className="text-[10px]">{item.supplier_product_code}</Badge>}
+                              </div>
+                              <p className="text-[10px] text-muted-foreground ml-5">{item.currency || offer.default_currency || "USD"} {item.offered_cost?.toFixed(2)} · Mín: {item.min_qty} · Múlt: {item.pack_multiple}</p>
+                            </div>
+                          </div>
+                          <ProductMatcher
+                            offerItem={item}
+                            existingMatch={match}
+                            onMatched={() => queryClient.invalidateQueries({ queryKey: ["offer-matches", id] })}
+                          />
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
             )}
           </Card>
         </TabsContent>
@@ -223,13 +309,26 @@ export default function SupplierOfferDetail() {
                 El sistema sugiere cantidades basadas en stock mínimo y existencia actual. Tú decides la cantidad final.
               </p>
             </div>
-            <ProposalTable
-              offer={offer}
-              matches={confirmedMatches}
-              offerItems={items}
-              internalOffers={internalOffers}
-              onOrderCreated={() => {}}
-            />
+            {loadingItems ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3 text-muted-foreground">
+                <Loader2 size={24} className="animate-spin text-primary" />
+                <p className="text-sm">Cargando ítems del pedido...</p>
+              </div>
+            ) : loadingProducts && userAlmacenes.length > 0 ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3 text-muted-foreground">
+                <Loader2 size={24} className="animate-spin text-primary" />
+                <p className="text-sm">Cargando datos del catálogo y stock...</p>
+                <p className="text-xs">Esto puede tardar unos segundos la primera vez</p>
+              </div>
+            ) : (
+              <ProposalTable
+                offer={offer}
+                matches={confirmedMatches}
+                offerItems={items}
+                internalOffers={mergedProductsMap}
+                onOrderCreated={() => {}}
+              />
+            )}
           </Card>
         </TabsContent>
       </Tabs>

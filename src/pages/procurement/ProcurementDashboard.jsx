@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "react-router-dom";
 import { ShoppingBag, Truck, ClipboardList, AlertCircle, Clock, CheckCircle2, Package, TrendingUp } from "lucide-react";
-import SalesAlertsPanel from "@/components/procurement/SalesAlertsPanel";
 import { useProcurementUser } from "@/hooks/useProcurementUser";
 
 function KpiCard({ title, value, icon: Icon, color = "primary", subtitle }) {
@@ -64,7 +63,7 @@ export default function ProcurementDashboard() {
     totalOrders: orders.length,
     draftOrders: orders.filter(o => o.status === "draft").length,
     totalAmount: orders.filter(o => o.status !== "cancelled").reduce((s, o) => s + (o.total_amount || 0), 0),
-    currency: offers[0]?.currency || "USD",
+    currency: offers[0]?.default_currency || "USD",
   };
 
   if (loadingUser || loadingOffers || loadingOrders) {
@@ -119,7 +118,6 @@ export default function ProcurementDashboard() {
       )}
 
       {/* Predictive Alerts */}
-      <SalesAlertsPanel />
 
       {/* Quick Links */}
       <div className="flex flex-wrap gap-2">

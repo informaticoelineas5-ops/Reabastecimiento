@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Search, X, Filter } from "lucide-react";
 
-export default function CatalogFilters({ filters, onFiltersChange, categories = [], proveedores = [] }) {
+export default function CatalogFilters({ filters, onFiltersChange, suministradores = [] }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const update = (key, value) => {
@@ -13,9 +13,9 @@ export default function CatalogFilters({ filters, onFiltersChange, categories = 
 
   const clear = () => {
     onFiltersChange({
-      search: "", clasificacion: "all", is_dead: "all", revision: "all",
+      search: "", revision: "all", estado_anuncio: "all",
       usa_catalogo: "all", has_catalog_diff: "all", categoria_online: "all",
-      proveedor: "all", stock_status: "all"
+      suministrador: "all", stock_status: "all",
     });
   };
 
@@ -36,18 +36,6 @@ export default function CatalogFilters({ filters, onFiltersChange, categories = 
           />
         </div>
 
-        <Select value={filters.clasificacion || "all"} onValueChange={(v) => update("clasificacion", v)}>
-          <SelectTrigger className="w-[140px] h-9">
-            <SelectValue placeholder="Clasificación" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="ambient">Ambiente</SelectItem>
-            <SelectItem value="chilled">Refrigerado</SelectItem>
-            <SelectItem value="frozen">Congelado</SelectItem>
-          </SelectContent>
-        </Select>
-
         <Select value={filters.stock_status || "all"} onValueChange={(v) => update("stock_status", v)}>
           <SelectTrigger className="w-[150px] h-9">
             <SelectValue placeholder="Stock" />
@@ -60,14 +48,18 @@ export default function CatalogFilters({ filters, onFiltersChange, categories = 
           </SelectContent>
         </Select>
 
-        <Select value={filters.is_dead || "all"} onValueChange={(v) => update("is_dead", v)}>
-          <SelectTrigger className="w-[130px] h-9">
-            <SelectValue placeholder="Estado" />
+        <Select value={filters.estado_anuncio || "all"} onValueChange={(v) => update("estado_anuncio", v)}>
+          <SelectTrigger className="w-[185px] h-9">
+            <SelectValue placeholder="Estado anuncio" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="active">Activas</SelectItem>
-            <SelectItem value="dead">Eliminadas</SelectItem>
+            <SelectItem value="all">Todos los estados</SelectItem>
+            <SelectItem value="Activo">Activo</SelectItem>
+            <SelectItem value="Pausado">Pausado</SelectItem>
+            <SelectItem value="Cerrado">Cerrado</SelectItem>
+            <SelectItem value="Inactivo">Inactivo</SelectItem>
+            <SelectItem value="SIN ID EF>0">Sin ID — EF &gt; 0</SelectItem>
+            <SelectItem value="SIN ID EF=0">Sin ID — EF = 0</SelectItem>
           </SelectContent>
         </Select>
 
@@ -119,15 +111,15 @@ export default function CatalogFilters({ filters, onFiltersChange, categories = 
             </SelectContent>
           </Select>
 
-          {proveedores.length > 0 && (
-            <Select value={filters.proveedor || "all"} onValueChange={(v) => update("proveedor", v)}>
-              <SelectTrigger className="w-[160px] h-8 text-xs">
-                <SelectValue placeholder="Proveedor" />
+          {suministradores.length > 0 && (
+            <Select value={filters.suministrador || "all"} onValueChange={(v) => update("suministrador", v)}>
+              <SelectTrigger className="w-[180px] h-8 text-xs">
+                <SelectValue placeholder="Suministrador" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los proveedores</SelectItem>
-                {proveedores.map((p) => (
-                  <SelectItem key={p} value={p}>{p}</SelectItem>
+                <SelectItem value="all">Todos los suministradores</SelectItem>
+                {suministradores.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

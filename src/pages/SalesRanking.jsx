@@ -1,232 +1,343 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { Link } from "react-router-dom";
+import { fetchSalesIndices } from "@/api/salesIndicesClient";
+import { fetchProductsForAlmacen } from "@/api/externalSupabaseClient";
+import { getUserPreferences } from "@/api/userPreferencesClient";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TrendingUp, Search, Info } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TrendingUp, Search, Warehouse } from "lucide-react";
 
-// ABC classification within category
-function classifyABC(products) {
-  const byCat = {};
-  for (const p of products) {
-    const cat = p.categoria_online || "Sin categoría";
-    if (!byCat[cat]) byCat[cat] = [];
-    byCat[cat].push(p);
-  }
-  const result = {};
-  for (const [, items] of Object.entries(byCat)) {
-    const sorted = [...items].sort((a, b) => b.avg_monthly - a.avg_monthly);
-    const n = sorted.length;
-    sorted.forEach((item, i) => {
-      const rank = i / n;
-      result[item.tienda_internal_id] = {
-        abc: rank < 0.2 ? "A" : rank < 0.5 ? "B" : "C",
-        rankInCat: i + 1,
-        totalInCat: n,
-      };
-    });
-  }
-  return result;
-}
+const PAGE_SIZE = 100;
 
 export default function SalesRanking() {
-  const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState("");
+  const [almacenFilter, setAlmacenFilter] = useState("all");
+  const [search, setSearch]               = useState("");
+  const [catFilter, setCatFilter]         = useState("");
+  const [catVFilter, setCatVFilter]       = useState("");
+  const [page, setPage]                   = useState(0);
 
-  const { data: salesRaw = [], isLoading } = useQuery({
-    queryKey: ["sales-index"],
-    queryFn: () => base44.entities.SalesIndex.list("-periodo_fecha", 5000),
+  // Preferencias del usuario
+  const { data: userPrefs } = useQuery({
+    queryKey: ["user-preferences"],
+    queryFn:  getUserPreferences,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const { data: offers = [] } = useQuery({
-    queryKey: ["offers-all-ranking"],
-    queryFn: () => base44.entities.Offer.list("-updated_date", 2000),
+  const configuredAlmacenes = userPrefs?.almacenes?.length
+    ? userPrefs.almacenes
+    : (userPrefs?.almacen ? [userPrefs.almacen] : []);
+
+  // Índices de venta (caché compartida con Catálogo)
+  const { data: salesMap = new Map(), isLoading: loadingMap } = useQuery({
+    queryKey:  ["sales-indices-db"],
+    queryFn:   fetchSalesIndices,
+    staleTime: 30 * 60 * 1000,
   });
 
-  const offerByTienda = useMemo(() => {
-    const m = {};
-    for (const o of offers) {
-      if (o.tienda_internal_id) m[o.tienda_internal_id] = o;
-    }
-    return m;
-  }, [offers]);
+  // Productos de TODOS los almacenes configurados en paralelo
+  const { data: productsMap = new Map(), isLoading: loadingProducts } = useQuery({
+    queryKey:  ["ranking-products-multi", configuredAlmacenes],
+    queryFn:   async () => {
+      if (!configuredAlmacenes.length) return new Map();
+      const maps = await Promise.all(
+        configuredAlmacenes.map(a => fetchProductsForAlmacen(a))
+      );
+      const merged = new Map();
+      configuredAlmacenes.forEach((almacen, idx) => {
+        maps[idx].forEach((p, key) => {
+          merged.set(key, { ...p, proveedor: almacen });
+        });
+      });
+      return merged;
+    },
+    staleTime: 10 * 60 * 1000,
+    enabled:   configuredAlmacenes.length > 0,
+  });
 
-  // Aggregate across periods
-  const products = useMemo(() => {
-    const map = {};
-    for (const s of salesRaw) {
-      const id = s.tienda_internal_id;
-      if (!map[id]) {
-        map[id] = {
-          tienda_internal_id: id,
-          nombre: s.nombre,
-          categoria_online: s.categoria_online,
-          suministrador: s.suministrador,
-          total_cantidad: 0,
-          total_ordenes: 0,
-          total_importe: 0,
-          periods: new Set(),
+  const isLoading = loadingMap || loadingProducts;
+
+  // Join: productos enriquecidos con índices, ordenados por Prom >0 desc
+  const ranked = useMemo(() => {
+    return [...productsMap.entries()]
+      .map(([id, p]) => {
+        const idx = salesMap.get(id);
+        return {
+          id_tienda:         id,
+          nombre:            p.nombre,
+          codigo:            p.codigo,
+          categoria_online:  p.categoria_online,
+          suministrador:     p.suministrador,
+          proveedor:         p.proveedor,
+          existencia_fisica: (p.cantidad ?? 0) + (p.reserved_qty ?? 0),
+          ...(idx ?? {}),
         };
-      }
-      map[id].total_cantidad += s.total_cantidad || 0;
-      map[id].total_ordenes += s.total_ordenes || 0;
-      map[id].total_importe += s.importe_total || 0;
-      map[id].periods.add(s.periodo_fecha);
-    }
-    return Object.values(map).map(p => ({
-      ...p,
-      num_periods: p.periods.size,
-      avg_monthly: p.periods.size > 0 ? Math.round((p.total_cantidad / p.periods.size) * 10) / 10 : 0,
-    }));
-  }, [salesRaw]);
+      })
+      .sort((a, b) => (b.prom_ventas_diario_mayor_0 ?? 0) - (a.prom_ventas_diario_mayor_0 ?? 0));
+  }, [productsMap, salesMap]);
 
-  const abcMap = useMemo(() => classifyABC(products), [products]);
+  // Categorías únicas del conjunto completo
+  const categories = useMemo(() =>
+    [...new Set(ranked.map(p => p.categoria_online).filter(Boolean))].sort(),
+  [ranked]);
 
-  const categories = useMemo(() => {
-    const s = new Set(products.map(p => p.categoria_online).filter(Boolean));
-    return Array.from(s).sort();
-  }, [products]);
-
+  // Filtros: almacén local + categoría + Cat.V + búsqueda
   const filtered = useMemo(() => {
-    let list = [...products];
-    if (catFilter) list = list.filter(p => p.categoria_online === catFilter);
+    let list = ranked;
+    if (almacenFilter !== "all") list = list.filter(p => p.proveedor === almacenFilter);
+    if (catFilter)               list = list.filter(p => p.categoria_online === catFilter);
+    if (catVFilter)              list = list.filter(p => p.categoriaVentas === catVFilter);
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter(p => p.nombre?.toLowerCase().includes(q) || p.tienda_internal_id?.includes(q));
+      list = list.filter(p =>
+        p.nombre?.toLowerCase().includes(q) ||
+        p.codigo?.toLowerCase().includes(q) ||
+        String(p.id_tienda).includes(q)
+      );
     }
-    return list.sort((a, b) => b.avg_monthly - a.avg_monthly);
-  }, [products, catFilter, search]);
+    return list;
+  }, [ranked, almacenFilter, catFilter, catVFilter, search]);
 
-  const periods = useMemo(() => {
-    const s = new Set(salesRaw.map(r => r.periodo_fecha));
-    return Array.from(s).sort();
-  }, [salesRaw]);
+  const handleAlmacenChange = (v) => {
+    setAlmacenFilter(v);
+    setCatFilter("");
+    setSearch("");
+    setPage(0);
+  };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground text-sm">Cargando índices...</div>;
-
-  if (salesRaw.length === 0) {
-    return (
-      <div className="p-6 text-center space-y-2">
-        <Info size={32} className="mx-auto text-muted-foreground opacity-40" />
-        <p className="text-muted-foreground text-sm">No hay índices de ventas importados.</p>
-      </div>
-    );
-  }
+  // ── Render ──────────────────────────────────────────────────────────
 
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
+
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <TrendingUp className="text-primary" size={22} />
-            Ranking de Ventas por Categoría
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {products.length} productos · {periods.length} períodos históricos ({periods[0]} → {periods[periods.length - 1]})
-            · Clasificación ABC <strong>dentro de cada categoría</strong>
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+            <TrendingUp size={18} className="text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">Ranking de Ventas</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isLoading
+                ? "Cargando..."
+                : `${ranked.length.toLocaleString()} productos · ordenados por Prom. Diario >0`
+              }
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+      </div>
+
+      {/* Filtro de almacén */}
+      <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg border flex-wrap">
+        <Warehouse size={16} className="text-muted-foreground shrink-0" />
+        <span className="text-sm font-medium shrink-0">Ver almacén:</span>
+
+        {configuredAlmacenes.length > 0 ? (
+          <Select value={almacenFilter} onValueChange={handleAlmacenChange}>
+            <SelectTrigger className="w-[300px] h-9 bg-background">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                Todos mis almacenes ({configuredAlmacenes.length})
+              </SelectItem>
+              {configuredAlmacenes.map(a => (
+                <SelectItem key={a} value={a}>{a}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Link to="/SalesIndexImport" className="text-xs text-warning underline">
+            Configura tus almacenes en Índices de Ventas
+          </Link>
+        )}
+
+        {!isLoading && configuredAlmacenes.length > 0 && (
+          <Badge variant="secondary" className="text-xs">
+            {(almacenFilter === "all" ? ranked : filtered).length.toLocaleString()} productos
+          </Badge>
+        )}
+      </div>
+
+      {/* Filtros secundarios */}
+      {!isLoading && ranked.length > 0 && (
+        <div className="flex gap-2 flex-wrap items-center">
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-2.5 text-muted-foreground" />
             <Input
               placeholder="Buscar producto..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setPage(0); }}
               className="pl-8 h-8 text-xs w-52"
             />
           </div>
-          <select
-            value={catFilter}
-            onChange={e => setCatFilter(e.target.value)}
-            className="h-8 text-xs border border-input rounded-md px-2 bg-background"
-          >
-            <option value="">Todas las categorías</option>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <Select value={catFilter || "all"} onValueChange={v => { setCatFilter(v === "all" ? "" : v); setPage(0); }}>
+            <SelectTrigger className="h-8 text-xs w-52">
+              <SelectValue placeholder="Todas las categorías" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las categorías</SelectItem>
+              {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={catVFilter || "all"} onValueChange={v => { setCatVFilter(v === "all" ? "" : v); setPage(0); }}>
+            <SelectTrigger className="h-8 text-xs w-36">
+              <SelectValue placeholder="Cat.V" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas Cat.V</SelectItem>
+              <SelectItem value="A">A — Top 20%</SelectItem>
+              <SelectItem value="B">B — 20–50%</SelectItem>
+              <SelectItem value="C">C — 50–80%</SelectItem>
+              <SelectItem value="D">D — Últimos 20%</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      </div>
+      )}
 
-      {/* Legend */}
-      <div className="flex gap-3 text-xs flex-wrap">
-        <div className="flex items-center gap-1.5"><Badge variant="default" className="text-[10px]">A</Badge> Top 20% de ventas en su categoría</div>
-        <div className="flex items-center gap-1.5"><Badge variant="secondary" className="text-[10px]">B</Badge> 20%–50%</div>
-        <div className="flex items-center gap-1.5"><Badge variant="outline" className="text-[10px]">C</Badge> Resto</div>
-        <span className="text-muted-foreground">· Venta/mes = promedio mensual acumulado por período</span>
-      </div>
+      {/* Loading */}
+      {isLoading && (
+        <div className="space-y-2">
+          {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
+        </div>
+      )}
 
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-muted/60 border-b border-border">
-              <th className="px-3 py-2 text-center font-medium text-muted-foreground w-10">#</th>
-              <th className="px-3 py-2 text-center font-medium text-muted-foreground w-10">Clase</th>
-              <th className="px-3 py-2 text-left font-medium text-muted-foreground">Producto</th>
-              <th className="px-3 py-2 text-left font-medium text-muted-foreground">Categoría</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Venta/mes</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Total uds.</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Órdenes</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Stock actual</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Stock mín.</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Stock máx.</th>
-              <th className="px-3 py-2 text-right font-medium text-muted-foreground">Sugerido comprar</th>
-              <th className="px-3 py-2 text-center font-medium text-muted-foreground">Rank en cat.</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p, i) => {
-              const abc = abcMap[p.tienda_internal_id];
-              const offer = offerByTienda[p.tienda_internal_id];
-              const currentStock = offer ? (offer.existencia_fisica || 0) + (offer.stock_reserva || 0) : null;
-              const stockMin = Math.ceil(p.avg_monthly * 1.5);
-              const stockMax = Math.ceil(p.avg_monthly * 3);
-              const suggestedQty = currentStock !== null ? Math.max(0, stockMax - currentStock) : null;
-              const isCritical = currentStock !== null && currentStock < stockMin;
+      {/* Sin almacenes configurados */}
+      {!isLoading && configuredAlmacenes.length === 0 && (
+        <div className="text-center py-20 text-muted-foreground">
+          <Warehouse size={40} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">Configura tus almacenes en Índices de Ventas</p>
+          <Link to="/SalesIndexImport">
+            <Button size="sm" className="mt-3">Ir a configuración</Button>
+          </Link>
+        </div>
+      )}
 
-              return (
-                <tr
-                  key={p.tienda_internal_id}
-                  className={`border-b border-border/50 last:border-0 hover:bg-muted/30 ${isCritical ? "bg-destructive/5" : ""}`}
-                >
-                  <td className="px-3 py-2 text-center text-muted-foreground">{i + 1}</td>
-                  <td className="px-3 py-2 text-center">
-                    <Badge
-                      variant={abc?.abc === "A" ? "default" : abc?.abc === "B" ? "secondary" : "outline"}
-                      className="text-[10px]"
-                    >
-                      {abc?.abc || "—"}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 max-w-[200px]">
-                    <p className="font-medium truncate">{p.nombre || "—"}</p>
-                    <p className="text-muted-foreground text-[10px]">{p.tienda_internal_id} · {p.suministrador}</p>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground max-w-[140px] truncate">{p.categoria_online}</td>
-                  <td className="px-3 py-2 text-right font-bold text-primary">{p.avg_monthly}</td>
-                  <td className="px-3 py-2 text-right">{p.total_cantidad}</td>
-                  <td className="px-3 py-2 text-right">{p.total_ordenes}</td>
-                  <td className={`px-3 py-2 text-right font-semibold ${isCritical ? "text-destructive" : ""}`}>
-                    {currentStock !== null ? currentStock : <span className="text-muted-foreground text-[10px]">sin cruce</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground">{stockMin}</td>
-                  <td className="px-3 py-2 text-right text-muted-foreground">{stockMax}</td>
-                  <td className="px-3 py-2 text-right">
-                    {suggestedQty !== null ? (
-                      suggestedQty > 0
-                        ? <span className="font-bold text-primary">{suggestedQty}</span>
-                        : <span className="text-success text-[10px]">OK</span>
-                    ) : <span className="text-muted-foreground text-[10px]">—</span>}
-                  </td>
-                  <td className="px-3 py-2 text-center text-muted-foreground text-[10px]">
-                    {abc ? `${abc.rankInCat}/${abc.totalInCat}` : "—"}
-                  </td>
+      {/* Sin datos */}
+      {!isLoading && configuredAlmacenes.length > 0 && ranked.length === 0 && (
+        <div className="p-10 text-center space-y-2">
+          <TrendingUp size={32} className="mx-auto text-muted-foreground opacity-30" />
+          <p className="text-sm font-medium">Sin datos de ranking</p>
+          <p className="text-xs text-muted-foreground">No se encontraron productos con índices de venta.</p>
+        </div>
+      )}
+
+      {/* Leyenda + Tabla */}
+      {!isLoading && ranked.length > 0 && (
+        <>
+          <div className="flex gap-4 text-xs flex-wrap items-center">
+            <span className="font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">Cat.V</span>
+            <div className="flex items-center gap-1"><Badge className="text-[10px] bg-emerald-600 text-white">A</Badge> Top 20%</div>
+            <div className="flex items-center gap-1"><Badge className="text-[10px] bg-emerald-100 text-emerald-800">B</Badge> 20–50%</div>
+            <div className="flex items-center gap-1"><Badge className="text-[10px] bg-yellow-100 text-yellow-700">C</Badge> 50–80%</div>
+            <div className="flex items-center gap-1"><Badge variant="outline" className="text-[10px]">D</Badge> Últimos 20%</div>
+            <span className="text-muted-foreground ml-2 text-[10px]">· Sin Cat.V = producto sin ventas registradas</span>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-muted/60 border-b border-border">
+                  <th className="px-3 py-2 text-center font-medium text-muted-foreground w-10">#</th>
+                  <th className="px-3 py-2 text-center font-medium text-emerald-700 w-14">Cat.V</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground min-w-[200px]">Producto</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Categoría</th>
+                  {configuredAlmacenes.length > 1 && almacenFilter === "all" && (
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">Almacén</th>
+                  )}
+                  <th className="px-3 py-2 text-right font-medium text-primary" title="Promedio diario >0">P.&gt;0</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground" title="Promedio ≥ max/2">P.≥½</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground" title="Promedio Últ. 1 mes">P.1m</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground" title="Índice AVG">I.AVG</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Exist.</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-muted-foreground text-center">{filtered.length} productos · Stock mín = 1.5× venta mensual · Stock máx = 3× venta mensual</p>
+              </thead>
+              <tbody>
+                {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((p, i) => {
+                  const globalIdx = page * PAGE_SIZE + i;
+                  const catVStyle =
+                    p.categoriaVentas === "A" ? "bg-emerald-600 text-white" :
+                    p.categoriaVentas === "B" ? "bg-emerald-100 text-emerald-800" :
+                    p.categoriaVentas === "C" ? "bg-yellow-100 text-yellow-700" :
+                    p.categoriaVentas === "D" ? "bg-gray-100 text-gray-500" : "";
+
+                  return (
+                    <tr key={`${p.id_tienda}-${p.proveedor}`}
+                      className="border-b border-border/50 last:border-0 hover:bg-muted/30">
+                      <td className="px-3 py-2 text-center text-muted-foreground">{globalIdx + 1}</td>
+                      <td className="px-3 py-2 text-center">
+                        {p.categoriaVentas
+                          ? <Badge className={`text-[10px] ${catVStyle}`}>{p.categoriaVentas}</Badge>
+                          : <span className="text-muted-foreground">—</span>
+                        }
+                      </td>
+                      <td className="px-3 py-2 max-w-[220px]">
+                        <p className="font-medium truncate">{p.nombre || "—"}</p>
+                        <p className="text-muted-foreground text-[10px]">{p.codigo} · {p.id_tienda}</p>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground max-w-[150px] truncate">
+                        {p.categoria_online || "—"}
+                      </td>
+                      {configuredAlmacenes.length > 1 && almacenFilter === "all" && (
+                        <td className="px-3 py-2 text-muted-foreground max-w-[160px] truncate text-[10px]">
+                          {p.proveedor}
+                        </td>
+                      )}
+                      <td className="px-3 py-2 text-right font-bold text-primary">
+                        {p.prom_ventas_diario_mayor_0 != null ? p.prom_ventas_diario_mayor_0.toFixed(3) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                        {p.prom_ventas_diario_top_max_2 != null ? p.prom_ventas_diario_top_max_2.toFixed(3) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                        {p.prom_ventas_diario_ult_1_mes != null ? p.prom_ventas_diario_ult_1_mes.toFixed(3) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {p.indiceAvg != null ? p.indiceAvg.toFixed(3) : "—"}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-semibold ${p.existencia_fisica === 0 ? "text-destructive" : ""}`}>
+                        {p.existencia_fisica}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Paginación */}
+          {(() => {
+            const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+            const from = page * PAGE_SIZE + 1;
+            const to   = Math.min((page + 1) * PAGE_SIZE, filtered.length);
+            return (
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {from.toLocaleString()}–{to.toLocaleString()} de {filtered.length.toLocaleString()}
+                  {filtered.length !== ranked.length && ` filtrados (${ranked.length.toLocaleString()} total)`}
+                </p>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+                      Anterior
+                    </Button>
+                    <Badge variant="secondary" className="px-3 py-1">
+                      {page + 1} / {totalPages}
+                    </Badge>
+                    <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>
+                      Siguiente
+                    </Button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </>
+      )}
     </div>
   );
 }

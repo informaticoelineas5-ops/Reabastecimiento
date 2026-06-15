@@ -24,14 +24,15 @@ const STATUS_LABELS = {
   archived: { label: "Archivada", color: "secondary" },
 };
 
-const CURRENCIES = ["USD", "EUR", "CUP", "MXN", "CLP", "COP"];
+const EMPTY_FORM = { supplier_name: "", supplier_id: null, offer_name: "", valid_from: "", valid_until: "", notes: "" };
 
 export default function SupplierOffers() {
   const { user, isLoading: loadingUser, isAdmin, getOwnerFilter } = useProcurementUser();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ supplier_name: "", offer_name: "", currency: "USD", exchange_rate: 1, valid_from: "", valid_until: "", notes: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [supplierMode, setSupplierMode] = useState("select"); // "select" | "new"
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
@@ -39,8 +40,15 @@ export default function SupplierOffers() {
 
   const { data: offers = [], isLoading } = useQuery({
     queryKey: ["supplier-offers", filter],
-    queryFn: () => filter ? base44.entities.SupplierOffer.filter(filter, "-created_date", 200) : base44.entities.SupplierOffer.list("-created_date", 200),
+    queryFn: () => filter
+      ? base44.entities.SupplierOffer.filter(filter, "-created_date", 200)
+      : base44.entities.SupplierOffer.list("-created_date", 200),
     enabled: !loadingUser,
+  });
+
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ["suppliers"],
+    queryFn: () => base44.entities.Supplier.list("name", 500),
   });
 
   const filtered = offers.filter((o) => {
@@ -53,11 +61,15 @@ export default function SupplierOffers() {
   const handleCreate = async () => {
     if (!form.supplier_name || !form.offer_name) return;
     setSaving(true);
-    await base44.entities.SupplierOffer.create({ ...form, status: "draft" });
-    queryClient.invalidateQueries({ queryKey: ["supplier-offers"] });
-    setSaving(false);
-    setShowCreate(false);
-    setForm({ supplier_name: "", offer_name: "", currency: "USD", exchange_rate: 1, valid_from: "", valid_until: "", notes: "" });
+    try {
+      await base44.entities.SupplierOffer.create({ ...form, status: "draft" });
+      queryClient.invalidateQueries({ queryKey: ["supplier-offers"] });
+      setShowCreate(false);
+      setForm(EMPTY_FORM);
+      setSupplierMode("select");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const today = new Date().toISOString().slice(0, 10);
@@ -127,7 +139,6 @@ export default function SupplierOffers() {
                         {offer.valid_from && format(new Date(offer.valid_from), "dd MMM yyyy", { locale: es })}
                         {offer.valid_until && ` → ${format(new Date(offer.valid_until), "dd MMM yyyy", { locale: es })}`}
                       </span>
-                      <Badge variant="outline" className="text-[10px]">{offer.currency || "USD"}</Badge>
                       {isAdmin && <span className="text-[10px] italic">por: {offer.created_by}</span>}
                     </div>
                   </div>
@@ -144,30 +155,64 @@ export default function SupplierOffers() {
       </div>
 
       {/* Create Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate} onOpenChange={(open) => { setShowCreate(open); if (!open) { setForm(EMPTY_FORM); setSupplierMode("select"); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Nueva Oferta de Proveedor</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            {/* Supplier selector */}
             <div>
               <label className="text-xs font-medium text-muted-foreground">Proveedor *</label>
-              <Input placeholder="Nombre del proveedor" value={form.supplier_name} onChange={e => setForm(p => ({ ...p, supplier_name: e.target.value }))} className="mt-1" />
+              <div className="mt-1 space-y-2">
+                {supplierMode === "select" ? (
+                  <div className="flex gap-2">
+                    <Select
+                      value={form.supplier_name}
+                      onValueChange={v => {
+                        const s = suppliers.find((/** @type {any} */ x) => x.name === v);
+                        setForm(p => ({ ...p, supplier_name: v, supplier_id: s?.id ?? null }));
+                      }}
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Seleccionar proveedor..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {suppliers.map(s => (
+                          <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button" variant="outline" size="sm"
+                      onClick={() => { setSupplierMode("new"); setForm(p => ({ ...p, supplier_name: "" })); }}
+                    >
+                      + Nuevo
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Nombre del nuevo proveedor"
+                      value={form.supplier_name}
+                      onChange={e => setForm(p => ({ ...p, supplier_name: e.target.value }))}
+                      className="flex-1"
+                      autoFocus
+                    />
+                    {suppliers.length > 0 && (
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        onClick={() => { setSupplierMode("select"); setForm(p => ({ ...p, supplier_name: "" })); }}
+                      >
+                        Lista
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
+
             <div>
               <label className="text-xs font-medium text-muted-foreground">Nombre / Referencia de la oferta *</label>
               <Input placeholder="Ej: Oferta Marzo 2026" value={form.offer_name} onChange={e => setForm(p => ({ ...p, offer_name: e.target.value }))} className="mt-1" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Moneda</label>
-                <Select value={form.currency} onValueChange={v => setForm(p => ({ ...p, currency: v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>{CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Tasa de cambio</label>
-                <Input type="number" step="0.01" value={form.exchange_rate} onChange={e => setForm(p => ({ ...p, exchange_rate: parseFloat(e.target.value) || 1 }))} className="mt-1" />
-              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

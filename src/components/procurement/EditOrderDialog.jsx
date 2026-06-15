@@ -20,12 +20,8 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
     if (order) {
       setOrderForm({
         supplier_name: order.supplier_name || "",
-        currency: order.currency || "USD",
+        currency:      order.currency || "USD",
         exchange_rate: order.exchange_rate || 1,
-        notes: order.notes || "",
-        supplier_contact: order.supplier_contact || "",
-        supplier_email: order.supplier_email || "",
-        supplier_address: order.supplier_address || "",
       });
     }
   }, [order]);
@@ -33,14 +29,12 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
   useEffect(() => {
     if (items) {
       setItemForms(items.map(i => ({
-        id: i.id,
-        product_name: i.product_name || "",
+        id:                    i.id,
+        product_name:          i.product_name || "",
         internal_product_code: i.internal_product_code || "",
-        unit: i.unit || "",
-        final_qty: i.final_qty ?? 0,
-        unit_cost: i.unit_cost ?? 0,
-        override_reason: i.override_reason || "",
-        status: i.status || "included",
+        final_qty:             i.final_qty ?? 0,
+        unit_cost:             i.unit_cost ?? 0,
+        status:                i.status || "included",
       })));
     }
   }, [items]);
@@ -60,26 +54,19 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
     setSaving(true);
     // Save order header
     await base44.entities.PurchaseOrder.update(order.id, {
-      supplier_name: orderForm.supplier_name,
-      currency: orderForm.currency,
-      exchange_rate: parseFloat(orderForm.exchange_rate) || 1,
-      notes: orderForm.notes,
-      supplier_contact: orderForm.supplier_contact,
-      supplier_email: orderForm.supplier_email,
-      supplier_address: orderForm.supplier_address,
+      supplier_name:  orderForm.supplier_name,
+      currency:       orderForm.currency,
+      exchange_rate:  parseFloat(orderForm.exchange_rate) || 1,
     });
 
     // Save each item
     await Promise.all(itemForms.map(it =>
       base44.entities.PurchaseOrderItem.update(it.id, {
-        product_name: it.product_name,
+        product_name:          it.product_name,
         internal_product_code: it.internal_product_code,
-        unit: it.unit,
-        final_qty: parseFloat(it.final_qty) || 0,
-        unit_cost: parseFloat(it.unit_cost) || 0,
-        subtotal: (parseFloat(it.final_qty) || 0) * (parseFloat(it.unit_cost) || 0),
-        override_reason: it.override_reason,
-        status: it.status,
+        final_qty:             parseFloat(it.final_qty) || 0,
+        unit_cost:             parseFloat(it.unit_cost) || 0,
+        status:                it.status,
       })
     ));
 
@@ -112,13 +99,6 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
             <F label="Proveedor *" value={orderForm.supplier_name || ""} onChange={v => setOrderForm(p => ({ ...p, supplier_name: v }))} className="col-span-2 md:col-span-1" />
             <F label="Moneda" value={orderForm.currency || ""} onChange={v => setOrderForm(p => ({ ...p, currency: v }))} />
             <F label="Tasa de cambio" value={orderForm.exchange_rate || ""} onChange={v => setOrderForm(p => ({ ...p, exchange_rate: v }))} type="number" />
-            <F label="Contacto proveedor" value={orderForm.supplier_contact || ""} onChange={v => setOrderForm(p => ({ ...p, supplier_contact: v }))} />
-            <F label="Email proveedor" value={orderForm.supplier_email || ""} onChange={v => setOrderForm(p => ({ ...p, supplier_email: v }))} />
-            <F label="Dirección proveedor" value={orderForm.supplier_address || ""} onChange={v => setOrderForm(p => ({ ...p, supplier_address: v }))} />
-            <div className="col-span-2 md:col-span-3 space-y-1">
-              <Label className="text-xs">Observaciones</Label>
-              <Input value={orderForm.notes || ""} onChange={e => setOrderForm(p => ({ ...p, notes: e.target.value }))} className="h-8 text-sm" placeholder="Notas adicionales..." />
-            </div>
           </div>
         </div>
 
@@ -130,7 +110,7 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-muted/60 border-b border-border">
-                    {["Código", "Producto", "Unidad", "Cantidad", "Precio unit.", "Subtotal", "Razón ajuste", "Estado"].map(h => (
+                    {["Código", "Producto", "Cantidad", "Precio unit.", "Subtotal", "Estado"].map(h => (
                       <th key={h} className="px-2 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -141,25 +121,19 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
                     return (
                       <tr key={it.id} className={`border-b border-border/50 ${it.status === "excluded" ? "opacity-50 bg-muted/20" : idx % 2 === 0 ? "" : "bg-muted/10"}`}>
                         <td className="px-2 py-1.5">
-                          <Input value={it.internal_product_code} onChange={e => updateItem(it.id, "internal_product_code", e.target.value)} className="h-6 text-xs w-20 font-mono" />
+                          <Input value={it.internal_product_code} onChange={e => updateItem(it.id, "internal_product_code", e.target.value)} className="h-6 text-xs w-24 font-mono" />
                         </td>
                         <td className="px-2 py-1.5">
-                          <Input value={it.product_name} onChange={e => updateItem(it.id, "product_name", e.target.value)} className="h-6 text-xs min-w-[140px]" />
+                          <Input value={it.product_name} onChange={e => updateItem(it.id, "product_name", e.target.value)} className="h-6 text-xs min-w-[160px]" />
                         </td>
                         <td className="px-2 py-1.5">
-                          <Input value={it.unit} onChange={e => updateItem(it.id, "unit", e.target.value)} className="h-6 text-xs w-14" />
+                          <Input type="number" value={it.final_qty} onChange={e => updateItem(it.id, "final_qty", e.target.value)} className="h-6 text-xs w-20 text-center" />
                         </td>
                         <td className="px-2 py-1.5">
-                          <Input type="number" value={it.final_qty} onChange={e => updateItem(it.id, "final_qty", e.target.value)} className="h-6 text-xs w-16" />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <Input type="number" value={it.unit_cost} onChange={e => updateItem(it.id, "unit_cost", e.target.value)} className="h-6 text-xs w-20" />
+                          <Input type="number" value={it.unit_cost} onChange={e => updateItem(it.id, "unit_cost", e.target.value)} className="h-6 text-xs w-24" />
                         </td>
                         <td className="px-2 py-1.5 font-semibold whitespace-nowrap">
                           {subtotal.toFixed(2)}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <Input value={it.override_reason} onChange={e => updateItem(it.id, "override_reason", e.target.value)} className="h-6 text-xs min-w-[100px]" placeholder="motivo..." />
                         </td>
                         <td className="px-2 py-1.5">
                           <select
@@ -177,7 +151,7 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
                 </tbody>
                 <tfoot>
                   <tr className="bg-muted/40 border-t-2 border-border">
-                    <td colSpan={5} className="px-2 py-2 text-right text-xs font-semibold">Total estimado:</td>
+                    <td colSpan={3} className="px-2 py-2 text-right text-xs font-semibold">Total estimado:</td>
                     <td className="px-2 py-2 font-bold text-sm">
                       {orderForm.currency || "USD"} {itemForms.filter(i => i.status !== "excluded").reduce((s, i) => s + (parseFloat(i.final_qty) || 0) * (parseFloat(i.unit_cost) || 0), 0).toFixed(2)}
                     </td>

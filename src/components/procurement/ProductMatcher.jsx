@@ -1,46 +1,41 @@
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Search, Check, Link2, X } from "lucide-react";
+import { Search, Check, Link2, X, Loader2 } from "lucide-react";
+import { searchCatalogProducts } from "@/api/externalSupabaseClient";
 
 export default function ProductMatcher({ offerItem, existingMatch, onMatched }) {
-  const [search, setSearch] = useState(existingMatch ? "" : (offerItem.supplier_product_code || offerItem.supplier_product_name || "").slice(0, 20));
+  const [search, setSearch] = useState(
+    existingMatch ? "" : (offerItem.supplier_product_name || offerItem.supplier_product_code || "").slice(0, 30)
+  );
   const [selected, setSelected] = useState(null);
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
-  const { data: internalOffers = [] } = useQuery({
-    queryKey: ["offers-for-matching"],
-    queryFn: () => base44.entities.Offer.list("-updated_date", 500),
-    staleTime: 120000,
-  });
+  const trimmedSearch = search.trim();
 
-  const suggestions = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    if (!q) return [];
-    return internalOffers.filter((o) =>
-      (o.codigo || "").toLowerCase().includes(q) ||
-      (o.nombre || "").toLowerCase().includes(q) ||
-      (o.marca || "").toLowerCase().includes(q)
-    ).slice(0, 8);
-  }, [search, internalOffers]);
+  const { data: suggestions = [], isFetching } = useQuery({
+    queryKey: ["catalog-search", trimmedSearch],
+    queryFn: () => searchCatalogProducts(trimmedSearch, 10),
+    enabled: trimmedSearch.length >= 2,
+    staleTime: 60000,
+  });
 
   const handleSave = async () => {
     if (!selected) return;
     setSaving(true);
     const payload = {
-      offer_item_id: offerItem.id,
-      offer_id: offerItem.offer_id,
-      internal_offer_id: selected.id,
-      internal_product_code: selected.codigo,
+      offer_item_id:         offerItem.id,
+      offer_id:              offerItem.offer_id,
+      internal_offer_id:     String(selected.id_online),
+      internal_product_code: selected.codigo || String(selected.id_online),
       internal_product_name: selected.nombre,
-      match_type: "manual",
-      match_confidence: 100,
-      confirmed_at: new Date().toISOString(),
-      status: "confirmed",
+      match_type:            "manual",
+      match_confidence:      100,
+      confirmed_at:          new Date().toISOString(),
+      status:                "confirmed",
     };
     if (existingMatch) {
       await base44.entities.OfferItemMatch.update(existingMatch.id, payload);
@@ -50,6 +45,7 @@ export default function ProductMatcher({ offerItem, existingMatch, onMatched }) 
     queryClient.invalidateQueries({ queryKey: ["offer-matches"] });
     setSaving(false);
     setSelected(null);
+    setSearch("");
     onMatched?.(selected);
   };
 
@@ -80,38 +76,48 @@ export default function ProductMatcher({ offerItem, existingMatch, onMatched }) 
         <Input
           value={search}
           onChange={(e) => { setSearch(e.target.value); setSelected(null); }}
-          placeholder="Buscar por código o nombre..."
-          className="pl-8 h-7 text-xs"
+          placeholder="Buscar en todo el catálogo..."
+          className="pl-8 h-7 text-xs pr-8"
         />
+        {isFetching && (
+          <Loader2 size={12} className="absolute right-2.5 top-2 text-muted-foreground animate-spin" />
+        )}
       </div>
 
-      {suggestions.length > 0 && (
-        <div className="border border-border rounded-md overflow-hidden max-h-44 overflow-y-auto bg-card shadow-sm">
+      {trimmedSearch.length >= 2 && suggestions.length > 0 && (
+        <div className="border border-border rounded-md overflow-hidden max-h-52 overflow-y-auto bg-card shadow-sm">
           {suggestions.map((o) => (
             <div
-              key={o.id}
+              key={String(o.id_online)}
               onClick={() => setSelected(o)}
-              className={`flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-muted text-xs transition-colors ${selected?.id === o.id ? "bg-primary/10" : ""}`}
+              className={`flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-muted text-xs transition-colors ${selected?.id_online === o.id_online ? "bg-primary/10" : ""}`}
             >
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-primary font-semibold">{o.codigo}</span>
-                <span className="text-foreground truncate max-w-[160px]">{o.nombre}</span>
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-primary font-semibold">{o.codigo || String(o.id_online)}</span>
+                  <span className="text-foreground truncate max-w-[150px]">{o.nombre}</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground">{o.proveedor} · {o.suministrador}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[10px] ${o.existencia_fisica > 0 ? "text-success" : "text-muted-foreground"}`}>
-                  {o.existencia_fisica ?? 0} u.
+                <span className={`text-[10px] ${(o.cantidad ?? 0) > 0 ? "text-success" : "text-muted-foreground"}`}>
+                  {o.cantidad ?? 0} u.
                 </span>
-                {selected?.id === o.id && <Check size={11} className="text-primary" />}
+                {selected?.id_online === o.id_online && <Check size={11} className="text-primary" />}
               </div>
             </div>
           ))}
         </div>
       )}
 
+      {trimmedSearch.length >= 2 && !isFetching && suggestions.length === 0 && (
+        <p className="text-xs text-muted-foreground text-center py-1">Sin resultados en el catálogo.</p>
+      )}
+
       {selected && (
         <Button size="sm" className="w-full h-7 text-xs" onClick={handleSave} disabled={saving}>
           <Link2 size={12} className="mr-1.5" />
-          {saving ? "Guardando..." : `Asociar con "${selected.codigo} — ${selected.nombre?.slice(0, 25)}"`}
+          {saving ? "Guardando..." : `Asociar — ${selected.codigo || String(selected.id_online)} · ${selected.nombre?.slice(0, 25)}`}
         </Button>
       )}
     </div>
