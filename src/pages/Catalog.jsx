@@ -1,17 +1,22 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, Package, Loader2, Warehouse } from "lucide-react";
+import SearchSelect from "@/components/common/SearchSelect";
+
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Download, Package, Loader2, Warehouse, Building2 } from "lucide-react";
+import { FilterField } from "@/components/common/FilterBar";
 import CatalogFilters from "../components/catalog/CatalogFilter";
 import CatalogTable from "../components/catalog/CatalogTable";
 import ExportPDF from "../components/catalog/ExportPDF";
 import ExportExcel from "../components/catalog/ExportExcel";
-import { fetchExtCatalogPaginated, fetchExtSuministradoresMulti, fetchApGlobalIndex } from "@/api/externalSupabaseClient";
-import { fetchSalesIndices } from "@/api/salesIndicesClient";
+import OfferDetail from "@/pages/OfferDetail";
+import { fetchIndgPaginated, fetchIndgAll } from "@/api/indgApSubClient";
+import { useIndgAlmacenes } from "@/hooks/useIndgAlmacenes";
+import { computeIndiceAvg, calcCategoria } from "@/api/salesIndicesClient";
 import { getUserPreferences, DEFAULT_SELECTED_INDICES } from "@/api/userPreferencesClient";
 
 const PAGE_SIZE = 50;
@@ -24,8 +29,9 @@ const SORT_MAP = {
 };
 
 // Normaliza un producto externo al formato que espera CatalogTable
-function normalizeProduct(p, salesMap, apGlobalMap) {
-  const indices = salesMap?.get(String(p.id_online)) ?? null;
+function normalizeProduct(p, selectedKeys = []) {
+  const indices = p.indices ?? null;
+  const indiceAvg = computeIndiceAvg(indices, selectedKeys);
   return {
     ...p,
     offer_external_id: p.id_online,
@@ -34,11 +40,11 @@ function normalizeProduct(p, salesMap, apGlobalMap) {
     stock_tienda:       0,
     fotos: Array.isArray(p.fotos) ? p.fotos.map(f => f.foto).filter(Boolean) : [],
     indices,
-    indiceAvg:       indices?.indiceAvg       ?? null,
-    categoriaVentas: indices?.categoriaVentas ?? null,
+    indiceAvg,
+    categoriaVentas: calcCategoria(indiceAvg),
     estadoAnuncio: !p.id_online
       ? ((p.cantidad ?? 0) > 0 ? 'SIN ID EF>0' : 'SIN ID EF=0')
-      : (apGlobalMap?.get(String(p.id_online)) ?? null),
+      : (p.estadoAnuncio ?? null),
   };
 }
 
@@ -72,14 +78,7 @@ function buildServerQuery(filters, almacenes, suministradores, almacenFilter, so
 
   if (filters.categoria_online !== "all") conditions.categoria_online = filters.categoria_online;
 
-  if (filters.stock_status === "in_stock")
-    extraFilters.push({ type: "gt",  column: "cantidad",     value: 0 });
-  if (filters.stock_status === "no_stock")
-    extraFilters.push({ type: "lte", column: "cantidad",     value: 0 });
-  if (filters.stock_status === "reserva_only") {
-    extraFilters.push({ type: "gt",  column: "reserved_qty", value: 0 });
-    extraFilters.push({ type: "lte", column: "cantidad",     value: 0 });
-  }
+  // stock_status applied client-side (API does not support range filters)
 
   const search = filters.search?.trim()
     ? { text: filters.search, columns: ["nombre", "codigo"] }
@@ -108,6 +107,8 @@ export default function Catalog() {
   const [sortDir,   setSortDir]   = useState("asc");
   const [page, setPage]           = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [toolbarEl, setToolbarEl] = useState(null);   // hueco de la franja de filtros donde se pinta el selector de columnas
 
   // Preferencias del usuario vía React Query (se invalida desde SalesIndexConfig al guardar)
   const { data: userPrefs } = useQuery({
@@ -130,10 +131,14 @@ export default function Catalog() {
 
   const q = buildServerQuery(filters, configuredAlmacenes, configuredSuministradores, almacenFilter, sortField, sortDir, page);
 
-  // Consulta principal paginada
-  const { data: result = { data: [], total: 0 }, isLoading, isFetching } = useQuery({
+  // Cuando stock_status o estado_anuncio están activos, necesitamos todos los productos
+  // para filtrar y paginar correctamente del lado del cliente (Option B)
+  const clientFilterActive = filters.stock_status !== "all" || filters.estado_anuncio !== "all";
+
+  // Consulta paginada normal (sin filtros de cliente)
+  const { data: result = { data: [], total: 0 }, isLoading: loadingPaginated, isFetching: fetchingPaginated, error: errorPaginated } = useQuery({
     queryKey:  ["ext-catalog", q],
-    queryFn:   () => fetchExtCatalogPaginated(q.conditions, {
+    queryFn:   () => fetchIndgPaginated(q.conditions, {
       search:       q.search,
       extraFilters: q.extraFilters,
       orderBy:      q.orderBy,
@@ -141,50 +146,85 @@ export default function Catalog() {
       offset:       q.offset,
     }),
     keepPreviousData: true,
-    enabled: configuredAlmacenes.length > 0,
+    enabled: !clientFilterActive && configuredAlmacenes.length > 0,
   });
 
-  // Índices de ventas (carga única, ~19k productos)
-  const { data: salesMap = new Map(), isLoading: loadingIndices } = useQuery({
-    queryKey:  ["sales-indices-db"],
-    queryFn:   fetchSalesIndices,
-    staleTime: 30 * 60 * 1000,
+  // Consulta de todos los productos (cuando filtros de cliente están activos)
+  const { data: fullProducts = [], isLoading: loadingFull, isFetching: fetchingFull, error: errorFull } = useQuery({
+    queryKey:  ["ext-catalog-all", q.conditions, q.search, q.orderBy],
+    queryFn:   () => fetchIndgAll(q.conditions, { search: q.search, orderBy: q.orderBy }),
+    enabled:   clientFilterActive && configuredAlmacenes.length > 0,
+    staleTime: 2 * 60 * 1000,
   });
 
-  // Estados de anuncio desde apGlobalV2
-  const { data: apGlobalIndex = null, isLoading: loadingApGlobal } = useQuery({
-    queryKey:  ["apglobal-index-v2"],
-    queryFn:   fetchApGlobalIndex,
-    staleTime: 30 * 60 * 1000,
-    retry: 1,
-  });
+  const loadError  = clientFilterActive ? errorFull : errorPaginated;
+  const isLoading  = clientFilterActive ? loadingFull       : loadingPaginated;
+  const isFetching = clientFilterActive ? fetchingFull      : fetchingPaginated;
 
-  // Suministradores disponibles para el filtro: si hay suministradores configurados, usarlos;
-  // de lo contrario, buscar los del almacén activo
-  const effectiveAlmacenesForSumi = almacenFilter !== "all"
-    ? [almacenFilter]
-    : configuredAlmacenes;
+  // Cada fila del catálogo ya trae sus índices y su estado de anuncio (reporte indg_ap_sub).
+  // Para las listas de los filtros (suministradores, estados) se usa la carga completa de los almacenes,
+  // que comparten Alertas y Reab Directo; llega en segundo plano y no frena la tabla.
+  const indg = useIndgAlmacenes(configuredAlmacenes, configuredAlmacenes.length > 0);
+  const loadingLists = indg.loading;
 
-  const { data: suministradoresFiltro = [] } = useQuery({
-    queryKey: ["ext-sumi-multi", effectiveAlmacenesForSumi],
-    queryFn:  () => fetchExtSuministradoresMulti(effectiveAlmacenesForSumi),
-    staleTime: 5 * 60 * 1000,
-    enabled: effectiveAlmacenesForSumi.length > 0,
-  });
+  const suministradoresFiltro = useMemo(() => {
+    const set = new Set();
+    indg.products.forEach(p => {
+      if (almacenFilter !== "all" && p.almacenSel !== almacenFilter) return;
+      if (p.suministrador) set.add(p.suministrador);
+    });
+    return [...set].sort((x, y) => x.localeCompare(y));
+  }, [indg.products, almacenFilter]);
 
   // If there are configured suministradores, only show those in the filter dropdown
   const suministradoresParaFiltro = configuredSuministradores.length > 0
     ? configuredSuministradores
     : suministradoresFiltro;
 
-  const apMap = apGlobalIndex?.map ?? null;
+  // En modo client-filter: partimos de todos los productos descargados
+  // En modo normal: partimos de la página del servidor
+  const rawProducts = clientFilterActive
+    ? fullProducts
+    : (result.data ?? []);
 
-  const allOffers = (result.data ?? []).map(p => normalizeProduct(p, salesMap, apMap));
-  const offers = filters.estado_anuncio === "all"
-    ? allOffers
-    : allOffers.filter(p => p.estadoAnuncio === filters.estado_anuncio);
-  const total      = result.total ?? 0;
+  const allOffers = rawProducts.map(p => normalizeProduct(p, selectedIndices));
+
+  // Filtros de cliente (stock y estado) — en modo normal estos filtros están en "all" por definición
+  const filteredOffers = allOffers.filter(p => {
+    if (filters.estado_anuncio !== "all" && p.estadoAnuncio !== filters.estado_anuncio) return false;
+    if (filters.stock_status === "in_stock"    && (p.cantidad ?? 0) <= 0) return false;
+    if (filters.stock_status === "no_stock"    && (p.cantidad ?? 0) >  0) return false;
+    if (filters.stock_status === "reserva_only" && ((p.reserved_qty ?? 0) <= 0 || (p.cantidad ?? 0) > 0)) return false;
+    return true;
+  });
+
+  // En modo client-filter: paginamos localmente sobre el resultado filtrado
+  // En modo normal: el servidor ya nos da la página correcta
+  const total = clientFilterActive ? filteredOffers.length : (result.total ?? 0);
   const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const offers = clientFilterActive
+    ? filteredOffers.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+    : filteredOffers;
+
+  // Unique estadoAnuncio values from the full apMap (not just current page)
+  const availableEstados = React.useMemo(() => {
+    const seen = new Set();
+    indg.apMap.forEach(estado => { if (estado) seen.add(estado); });
+    rawProducts.forEach(p => { if (p.estadoAnuncio) seen.add(p.estadoAnuncio); });
+    seen.add('SIN ID EF>0');
+    seen.add('SIN ID EF=0');
+    return [...seen].sort();
+  }, [indg.apMap, rawProducts]);
+
+  // Resetear página al cambiar entre modo paginado-servidor y modo client-filter
+  const prevClientFilterRef = React.useRef(clientFilterActive);
+  React.useEffect(() => {
+    if (prevClientFilterRef.current !== clientFilterActive) {
+      setPage(0);
+      prevClientFilterRef.current = clientFilterActive;
+    }
+  }, [clientFilterActive]);
 
   const handleFiltersChange = (f) => { setFilters(f); setPage(0); };
   const handleSort = (field, dir) => { setSortField(field); setSortDir(dir); setPage(0); };
@@ -199,11 +239,8 @@ export default function Catalog() {
   const exportCSV = async () => {
     setExporting(true);
     try {
-      const { data: all } = await fetchExtCatalogPaginated(q.conditions, {
-        search: q.search, extraFilters: q.extraFilters, orderBy: q.orderBy,
-        limit: 100_000, offset: 0,
-      });
-      const norm = all.map(p => normalizeProduct(p, salesMap, apMap));
+      const all = await fetchIndgAll(q.conditions, { search: q.search, orderBy: q.orderBy });
+      const norm = all.map(p => normalizeProduct(p, selectedIndices));
       const indexHeaders = selectedIndices;
       const headers = ["codigo", "nombre", "suministrador", "proveedor", "offer_external_id",
                        "precio", "existencia_fisica", "stock_reserva", "estadoAnuncio", "revision",
@@ -256,15 +293,10 @@ export default function Catalog() {
                 ? `${total.toLocaleString()} productos`
                 : "Configura tus almacenes"}
             </p>
-            {(loadingIndices || loadingApGlobal) && (
+            {clientFilterActive && loadingFull && (
               <p className="text-[10px] flex items-center gap-1 mt-0.5 text-muted-foreground">
                 <Loader2 size={9} className="animate-spin" />
-                {loadingIndices && loadingApGlobal
-                  ? "Cargando índices y estados..."
-                  : loadingIndices
-                    ? "Cargando índices de venta..."
-                    : "Cargando estados de anuncio..."
-                }
+                Descargando productos para filtrar...
               </p>
             )}
           </div>
@@ -285,46 +317,12 @@ export default function Catalog() {
         </div>
       </div>
 
-      {/* Filtro por almacén (de los configurados) */}
-      <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg border flex-wrap">
-        <Warehouse size={16} className="text-muted-foreground shrink-0" />
-        <span className="text-sm font-medium shrink-0">Ver almacén:</span>
-        <Select value={almacenFilter} onValueChange={v => { setAlmacenFilter(v); setPage(0); }}>
-          <SelectTrigger className="w-[280px] h-9 bg-background">
-            <SelectValue placeholder="Selecciona almacén..." />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos mis almacenes ({configuredAlmacenes.length})</SelectItem>
-            {configuredAlmacenes.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        {configuredAlmacenes.length === 0 && (
-          <Link to="/SalesIndexImport" className="text-xs text-warning underline">
-            Configura tus almacenes en Índices de Ventas
-          </Link>
-        )}
-        {configuredAlmacenes.length > 0 && (
-          <Badge variant="secondary" className="text-xs">
-            {total.toLocaleString()} productos
-          </Badge>
-        )}
-      </div>
-
-      {/* Barra de carga de datos secundarios */}
-      {(loadingIndices || loadingApGlobal) && (
+      {/* Listas de los filtros (suministradores y estados): llegan en segundo plano */}
+      {loadingLists && (
         <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary/5 border border-primary/10 text-xs text-muted-foreground">
           <Loader2 size={13} className="animate-spin text-primary shrink-0" />
-          <span className="font-medium text-foreground">Cargando datos adicionales</span>
-          <span className="text-muted-foreground">—</span>
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className={loadingIndices ? "text-muted-foreground" : "text-chart-2"}>
-              {loadingIndices ? "⏳ Índices de venta" : "✓ Índices"}
-            </span>
-            <span className={loadingApGlobal ? "text-muted-foreground" : "text-chart-2"}>
-              {loadingApGlobal ? "⏳ Estados de anuncio" : "✓ Estados"}
-            </span>
-          </div>
-          <span className="ml-auto text-[10px]">Las columnas de índices y estado aparecerán al terminar</span>
+          <span className="font-medium text-foreground">Cargando listas de filtros</span>
+          <span className="ml-auto text-[10px]">Suministradores y estados de anuncio aparecerán al terminar</span>
         </div>
       )}
 
@@ -334,8 +332,39 @@ export default function Catalog() {
           <CatalogFilters
             filters={filters}
             onFiltersChange={handleFiltersChange}
-            suministradores={suministradoresParaFiltro}
+            availableEstados={availableEstados}
+            trailing={<div ref={setToolbarEl} className="ml-auto" />}
+            leading={
+              <>
+                <FilterField icon={Warehouse} label="Almacén">
+                  <SearchSelect
+                    value={almacenFilter}
+                    onChange={v => { setAlmacenFilter(v); setPage(0); }}
+                    options={configuredAlmacenes}
+                    allValue="all" allLabel={`Todos mis almacenes (${configuredAlmacenes.length})`}
+                    placeholder="Almacén" size="sm" className="w-[210px]"
+                  />
+                </FilterField>
+                {suministradoresParaFiltro.length > 0 && (
+                  <FilterField icon={Building2} label="Suministrador">
+                    <SearchSelect
+                      value={filters.suministrador || "all"}
+                      onChange={v => handleFiltersChange({ ...filters, suministrador: v })}
+                      options={suministradoresParaFiltro}
+                      allValue="all" allLabel="Todos los suministradores"
+                      placeholder="Suministrador" size="sm" className="w-[210px]"
+                    />
+                  </FilterField>
+                )}
+              </>
+            }
           />
+
+          {loadError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              No se pudo cargar el catálogo: {loadError.message}
+            </div>
+          )}
 
           {/* Tabla */}
           {isLoading && !offers.length ? (
@@ -346,7 +375,8 @@ export default function Catalog() {
               sortField={sortField}
               sortDir={sortDir}
               onSort={handleSort}
-              selectedIndices={selectedIndices}
+              onSelectProduct={setSelectedProduct}
+              toolbarEl={toolbarEl}
             />
           )}
 
@@ -384,6 +414,29 @@ export default function Catalog() {
           <p className="text-sm">Configura tus almacenes en Índices de Ventas para ver el catálogo</p>
         </div>
       )}
+
+      {/* Product Detail Modal */}
+      <Dialog open={!!selectedProduct} onOpenChange={(open) => { if (!open) setSelectedProduct(null); }}>
+        <DialogContent
+          className="p-0 gap-0 overflow-hidden"
+          style={{ maxWidth: "min(1100px, 95vw)", width: "95vw", maxHeight: "93vh", display: "flex", flexDirection: "column" }}
+          aria-describedby={undefined}
+        >
+          <DialogTitle className="sr-only">Detalle del producto</DialogTitle>
+          <div className="flex-1 overflow-y-auto">
+            {selectedProduct && (
+              <OfferDetail
+                productId={
+                  selectedProduct.id_online != null
+                    ? String(selectedProduct.id_online)
+                    : String(selectedProduct.id)
+                }
+                onClose={() => setSelectedProduct(null)}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

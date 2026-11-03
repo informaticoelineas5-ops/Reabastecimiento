@@ -11,7 +11,9 @@ export default function ExportExcel({ offers, filters }) {
     setTimeout(() => {
       const rows = offers.map((o) => {
         const diferencia = (o.existencia_fisica || 0) - ((o.stock_reserva || 0) + (o.stock_tienda || 0));
+        const foto = o.fotos?.[0];
         return {
+          "Imagen": foto?.foto ?? foto ?? "",
           "Código": o.codigo || "",
           "Nombre": o.nombre || "",
           "Marca": o.marca || "",
@@ -39,7 +41,7 @@ export default function ExportExcel({ offers, filters }) {
 
       // Column widths
       ws["!cols"] = [
-        { wch: 12 }, { wch: 35 }, { wch: 20 }, { wch: 20 }, { wch: 14 },
+        { wch: 40 }, { wch: 12 }, { wch: 35 }, { wch: 20 }, { wch: 20 }, { wch: 14 },
         { wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 13 }, { wch: 30 },
         { wch: 14 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 13 },
         { wch: 13 }, { wch: 17 }, { wch: 20 }, { wch: 20 }, { wch: 10 },
