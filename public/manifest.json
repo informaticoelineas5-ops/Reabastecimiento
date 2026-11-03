@@ -1,6 +1,6 @@
 {
-  "name": "Sistema de Reabastecimiento",
-  "short_name": "Reabastecimiento",
+  "name": "Reabastecimiento Inteligencia Comercial",
+  "short_name": "Reabastecimiento IC",
   "description": "Aplicación para análisis de inventario, compras y reabastecimiento.",
   "start_url": "/",
   "display": "standalone",
@@ -8,7 +8,7 @@
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "https://base44.com/logo_v2.svg",
+      "src": "/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

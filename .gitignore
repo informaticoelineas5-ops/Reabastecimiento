@@ -29,3 +29,6 @@ dist-ssr
 *.sw?
 
 .env
+# Excluidos del repo
+.claude/2da revision/
+migrate_rdp_vd.mjs

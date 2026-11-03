@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manual de Usuario — Reabastecimiento</title>
+<style>
+  :root {
+    --navy:   #0F1E35;
+    --ink:    #1A2D45;
+    --rule:   #D0DCE8;
+    --text:   #1C2B3A;
+    --soft:   #4A6278;
+    --muted:  #7A94A8;
+    --accent: #1D6FDB;
+    --light:  #EBF2FB;
+    --green:  #0C7B4E;
+    --greenL: #E6F5EF;
+    --amber:  #B45309;
+    --amberL: #FEF3C7;
+    --red:    #B91C1C;
+    --redL:   #FEE2E2;
+    --purple: #6D28D9;
+    --purpleL:#EDE9FE;
+    --sans:   system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono:   ui-monospace, 'SF Mono', 'Cascadia Code', 'Courier New', monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--sans); font-size: 14px; line-height: 1.7;
+    color: var(--text); background: #fff;
+    max-width: 860px; margin: 0 auto; padding: 0 0 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* COVER */
+  .cover { background: var(--navy); color: #fff; padding: 64px 56px 56px; position: relative; overflow: hidden; }
+  .cover::after { content:''; position:absolute; right:-60px; top:-60px; width:320px; height:320px; border-radius:50%; background:rgba(255,255,255,.04); }
+  .cover-badge { display:inline-flex; align-items:center; gap:10px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15); border-radius:8px; padding:6px 14px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:32px; }
+  .cover-badge span { background:var(--accent); color:#fff; font-weight:700; font-size:11px; padding:2px 7px; border-radius:4px; }
+  .cover h1 { font-size:38px; font-weight:800; letter-spacing:-.03em; line-height:1.1; margin-bottom:12px; }
+  .cover h1 em { font-style:normal; color:#6AB4FF; }
+  .cover-sub { font-size:15px; color:rgba(255,255,255,.6); margin-bottom:40px; max-width:480px; line-height:1.5; }
+  .cover-meta { font-size:12px; color:rgba(255,255,255,.4); border-top:1px solid rgba(255,255,255,.1); padding-top:20px; display:flex; gap:24px; }
+  .cover-meta strong { color:rgba(255,255,255,.7); }
+
+  /* TOC */
+  .toc { background:var(--light); border-bottom:3px solid var(--accent); padding:32px 56px; }
+  .toc h2 { font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-bottom:16px; }
+  .toc-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 32px; }
+  .toc a { display:flex; align-items:center; gap:8px; color:var(--text); text-decoration:none; font-size:13px; padding:4px 0; border-bottom:1px dotted var(--rule); }
+  .toc a:hover { color:var(--accent); }
+  .toc-num { font-family:var(--mono); font-size:10px; color:var(--accent); min-width:22px; font-weight:700; }
+
+  /* CONTENT */
+  .content { padding: 0 56px; }
+
+  /* CHAPTER */
+  .chapter { margin-top:56px; scroll-margin-top:20px; }
+  .chapter-header { display:flex; align-items:center; gap:14px; background:var(--navy); color:#fff; padding:14px 20px; border-radius:10px; margin-bottom:28px; }
+  .chapter-num { background:var(--accent); color:#fff; font-family:var(--mono); font-size:13px; font-weight:700; width:32px; height:32px; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .chapter-title { font-size:17px; font-weight:700; letter-spacing:-.01em; }
+
+  /* SECTION */
+  .section { margin-bottom:32px; }
+  .section h3 { font-size:14px; font-weight:700; color:var(--ink); margin-bottom:10px; padding-bottom:6px; border-bottom:2px solid var(--rule); display:flex; align-items:center; gap:8px; }
+  .section h3 .ico { font-size:16px; }
+  .section p { color:var(--soft); margin-bottom:10px; font-size:13.5px; }
+  .section p:last-child { margin-bottom:0; }
+
+  /* STEPS */
+  .steps { counter-reset:step; display:flex; flex-direction:column; gap:12px; margin:12px 0; }
+  .step { display:grid; grid-template-columns:28px 1fr; gap:12px; align-items:start; }
+  .step::before { counter-increment:step; content:counter(step); background:var(--accent); color:#fff; font-size:11px; font-weight:700; font-family:var(--mono); width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:2px; }
+  .step-body { font-size:13px; color:var(--soft); line-height:1.6; }
+  .step-body strong { color:var(--text); }
+
+  /* CALLOUTS */
+  .note, .warning, .tip { border-radius:8px; padding:12px 16px; font-size:13px; margin:14px 0; display:flex; gap:10px; align-items:flex-start; line-height:1.5; }
+  .note   { background:var(--light);  border-left:3px solid var(--accent); color:var(--soft); }
+  .warning{ background:var(--amberL); border-left:3px solid var(--amber);  color:var(--amber); }
+  .tip    { background:var(--greenL); border-left:3px solid var(--green);  color:var(--green); }
+  .note .ico, .warning .ico, .tip .ico { font-size:16px; flex-shrink:0; margin-top:1px; }
+  .note strong { color:var(--accent); }
+  .warning strong { color:var(--amber); }
+  .tip strong { color:var(--green); }
+
+  /* UI ELEMENTS */
+  kbd { background:#f0f4f8; border:1px solid #cdd8e3; border-bottom-width:2px; border-radius:4px; font-family:var(--mono); font-size:11px; padding:1px 6px; color:var(--text); white-space:nowrap; }
+  .btn-sample { display:inline-flex; align-items:center; gap:5px; background:var(--accent); color:#fff; font-size:12px; font-weight:600; padding:4px 10px; border-radius:5px; white-space:nowrap; }
+  .btn-sample.outline { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .btn-sample.danger  { background:var(--red); }
+  .btn-sample.green   { background:var(--green); }
+  .btn-sample.purple  { background:var(--purple); }
+  .btn-sample.amber   { background:var(--amber); }
+
+  /* STATUS BADGES */
+  .badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; white-space:nowrap; }
+  .badge.green  { background:var(--greenL); color:var(--green); }
+  .badge.amber  { background:var(--amberL); color:var(--amber); }
+  .badge.blue   { background:var(--light);  color:var(--accent); }
+  .badge.red    { background:var(--redL);   color:var(--red); }
+  .badge.gray   { background:#f0f4f8;       color:var(--muted); }
+  .badge.purple { background:var(--purpleL);color:var(--purple); }
+
+  /* TABLE */
+  .data-table { width:100%; border-collapse:collapse; font-size:13px; margin:12px 0; }
+  .data-table th { background:var(--ink); color:#fff; text-align:left; padding:8px 12px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .data-table th:first-child { border-radius:7px 0 0 0; }
+  .data-table th:last-child  { border-radius:0 7px 0 0; }
+  .data-table td { padding:9px 12px; border-bottom:1px solid var(--rule); color:var(--soft); vertical-align:top; }
+  .data-table tr:last-child td { border-bottom:none; }
+  .data-table tr:nth-child(odd) td { background:#f8fafc; }
+
+  /* FLOW DIAGRAM */
+  .flow { display:flex; align-items:center; gap:0; flex-wrap:wrap; margin:16px 0; background:#f8fafc; border:1px solid var(--rule); border-radius:10px; padding:16px 20px; }
+  .flow-step { background:var(--navy); color:#fff; font-size:11px; font-weight:600; padding:7px 12px; border-radius:6px; text-align:center; line-height:1.3; white-space:nowrap; }
+  .flow-step.ic { background:var(--purple); }
+  .flow-step.rev { background:var(--amber); }
+  .flow-step.ok { background:var(--green); }
+  .flow-arrow { color:var(--muted); font-size:18px; padding:0 6px; flex-shrink:0; }
+
+  /* APPROVAL FLOW */
+  .approval-flow { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:2px; margin:16px 0; }
+  .af-step { padding:10px 12px; text-align:center; font-size:11px; font-weight:600; }
+  .af-step .label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+  .af-step .name { font-size:12px; }
+  .af-step.comercial { background:#EFF6FF; color:#1D4ED8; border-radius:8px 0 0 8px; }
+  .af-step.ic        { background:var(--purpleL); color:var(--purple); }
+  .af-step.revisor   { background:var(--amberL); color:var(--amber); }
+  .af-step.done      { background:var(--greenL); color:var(--green); border-radius:0 8px 8px 0; }
+
+  /* RULE */
+  hr { border:none; border-top:1px solid var(--rule); margin:40px 0; }
+
+  /* GLOSSARY */
+  .glossary-item { margin-bottom:14px; }
+  .glossary-term { font-weight:700; color:var(--text); font-size:13px; }
+  .glossary-def  { font-size:13px; color:var(--soft); margin-top:2px; }
+
+  /* PRINT */
+  @media print {
+    body { font-size:12px; }
+    .cover { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .chapter-header { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .chapter { page-break-before:always; }
+    .chapter:first-of-type { page-break-before:avoid; }
+    .toc { page-break-after:always; }
+    a { color:var(--text); text-decoration:none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- PORTADA -->
+<div class="cover">
+  <div class="cover-badge"><span>RE</span> Sistema de Reabastecimiento</div>
+  <h1>Manual de<br><em>Usuario</em></h1>
+  <p class="cover-sub">Guía completa para la gestión de proveedores, importación de ofertas, reabastecimiento y órdenes de compra — incluyendo el flujo de aprobación IC / Revisor y el módulo de Bodegones.</p>
+  <div class="cover-meta">
+    <div><strong>Versión</strong> 2.4</div>
+    <div><strong>Fecha</strong> Octubre 2026</div>
+    <div><strong>Empresa</strong> Mercado Elíneas</div>
+  </div>
+</div>
+
+<!-- ÍNDICE -->
+<div class="toc">
+  <h2>Contenido</h2>
+  <div class="toc-grid">
+    <a href="#cap1"><span class="toc-num">01</span> Introducción al sistema</a>
+    <a href="#cap7"><span class="toc-num">07</span> Flujo de aprobación</a>
+    <a href="#cap2"><span class="toc-num">02</span> Acceso y navegación</a>
+    <a href="#cap8"><span class="toc-num">08</span> Confirmación del proveedor</a>
+    <a href="#cap3"><span class="toc-num">03</span> Gestión de proveedores</a>
+    <a href="#cap-agenda"><span class="toc-num">09</span> Agenda</a>
+    <a href="#cap4"><span class="toc-num">04</span> Ofertas de proveedores</a>
+    <a href="#cap-bodegones"><span class="toc-num">10</span> Reabastecimiento de Bodegones</a>
+    <a href="#cap5"><span class="toc-num">05</span> Propuesta de reabastecimiento</a>
+    <a href="#cap-otras"><span class="toc-num">11</span> Otras secciones del sistema</a>
+    <a href="#cap6"><span class="toc-num">06</span> Órdenes de compra</a>
+    <a href="#cap9"><span class="toc-num">12</span> Glosario</a>
+  </div>
+</div>
+
+<div class="content">
+
+<!-- CAP 1 -->
+<div class="chapter" id="cap1">
+  <div class="chapter-header">
+    <div class="chapter-num">1</div>
+    <div class="chapter-title">Introducción al sistema</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📦</span> ¿Qué es Reabastecimiento?</h3>
+    <p>Reabastecimiento es el sistema interno para gestionar el ciclo completo de abastecimiento: desde recibir las listas de precios de los proveedores hasta generar, aprobar internamente y confirmar las órdenes de compra.</p>
+    <p>Está diseñado para múltiples roles dentro del equipo: el Comercial gestiona el ciclo completo de importación y pedido, el equipo de Inteligencia Comercial (IC) revisa las cantidades, el Revisor aprueba el pedido final, y el Comercial cierra el ciclo con la confirmación del proveedor.</p>
+    <p>Además incluye el módulo de <strong>Bodegones</strong> (capítulo 10): la reposición del bodegón 1053 desde su almacén de origen y el reparto de las facturas de Mayorista 23 entre los cuatro bodegones.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔄</span> Flujo general del sistema</h3>
+    <div class="flow">
+      <div class="flow-step">Proveedor<br>envía lista</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Importar<br>oferta</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Emparejar<br>productos</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Propuesta &amp;<br>Pedido</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step ic">Revisión<br>IC</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step rev">Aprobación<br>Revisor</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step ok">Confirmación<br>Proveedor</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">👥</span> Roles de usuario</h3>
+    <table class="data-table">
+      <thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Admin</strong></td>
+          <td>Acceso completo: gestión de usuarios, proveedores, ofertas y órdenes. Puede hacer cualquier acción del sistema.</td>
+        </tr>
+        <tr>
+          <td><strong>Supervisor</strong></td>
+          <td>Acceso amplio, casi igual al de Admin, para supervisar compras, bodegones y catálogos. No gestiona usuarios (eso es solo del Admin). Este rol no se asigna desde la pantalla Usuarios.</td>
+        </tr>
+        <tr>
+          <td><strong>Comercial</strong></td>
+          <td>Importa ofertas, crea propuestas y pedidos de compra, envía el pedido al flujo de aprobación. Una vez aprobado, descarga el PDF y sube la respuesta del proveedor.</td>
+        </tr>
+        <tr>
+          <td><strong>Analista IC</strong></td>
+          <td>Recibe los pedidos enviados por el Comercial. Revisa y ajusta las cantidades finales. Envía al Revisor cuando está conforme.</td>
+        </tr>
+        <tr>
+          <td><strong>Revisor</strong></td>
+          <td>Recibe los pedidos desde el Analista IC (o directamente del Comercial). Ajusta las cantidades finales y aprueba el pedido. La aprobación notifica automáticamente al Comercial.</td>
+        </tr>
+        <tr>
+          <td><strong>Inventario</strong></td>
+          <td>Acceso al catálogo de productos, índices de ventas, ranking de ventas, la lista de Pedidos de compra y la pantalla de U/C Pendientes de Bodegones. No accede al resto del módulo de compras.</td>
+        </tr>
+        <tr>
+          <td><strong>Consulta</strong></td>
+          <td>Solo puede visualizar información. No puede crear ni modificar ningún registro.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- CAP 2 -->
+<div class="chapter" id="cap2">
+  <div class="chapter-header">
+    <div class="chapter-num">2</div>
+    <div class="chapter-title">Acceso y navegación</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔐</span> Iniciar sesión</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Abre el navegador y entra a la dirección del sistema proporcionada por el administrador.</div></div>
+      <div class="step"><div class="step-body">Ingresa tu <strong>correo electrónico</strong> y <strong>contraseña</strong> en el formulario de acceso.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample">Iniciar sesión</span>. Si tus credenciales son correctas, entrarás al panel principal.</div></div>
+    </div>
+    <div class="note"><span class="ico">ℹ️</span><div>Los usuarios y sus roles se crean en <strong>Identity</strong>, no en esta aplicación. Si no puedes entrar, o entras pero solo ves información en modo consulta, pide al administrador que te asigne tu rol de <strong>Reabastecimiento</strong> en Identity. Quien no tiene ningún rol asignado para este sistema entra como <em>Consulta</em>. Un cambio de rol llega a las sesiones abiertas en menos de 30 segundos.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🧭</span> Navegación principal</h3>
+    <p>El menú lateral izquierdo da acceso a las secciones según tu rol. Las secciones de <strong>Reabastecimiento</strong> (Panel Compras, Ofertas, Pedidos, Proveedores) son visibles para los roles Comercial, Analista IC, Revisor y Admin.</p>
+    <table class="data-table">
+      <thead><tr><th>Sección</th><th>Para qué sirve</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Dashboard</strong></td><td>Resumen general del estado de compras y enlace rápido a la Agenda.</td></tr>
+        <tr><td><strong>Catálogo</strong></td><td>Productos del catálogo interno de la tienda.</td></tr>
+        <tr><td><strong>Alertas</strong></td><td>Productos en déficit de alta venta filtrados por almacén; inconsistencias de inventario.</td></tr>
+        <tr><td><strong>Índices de Ventas</strong></td><td>Consulta de índices de ventas diarias por producto.</td></tr>
+        <tr><td><strong>Ranking Ventas</strong></td><td>Ranking de productos por volumen de ventas.</td></tr>
+        <tr><td><strong>Panel Compras</strong></td><td>Vista global de todas las ofertas y pedidos en curso.</td></tr>
+        <tr><td><strong>Agenda</strong></td><td>Calendario de contactos con proveedores, pagos pendientes y recordatorios del ciclo de compras. Ver capítulo 9.</td></tr>
+        <tr><td><strong>Ofertas Proveedor</strong></td><td>Listas de precios importadas de proveedores.</td></tr>
+        <tr><td><strong>Pedidos de Compra</strong></td><td>Órdenes de compra generadas y su seguimiento.</td></tr>
+        <tr><td><strong>Proveedores</strong></td><td>Directorio de proveedores, contactos y seguimiento de comunicaciones.</td></tr>
+        <tr><td><strong>Reab. Directo</strong></td><td>Inventario por almacén con el cálculo de cuánto pedir según el ritmo de ventas. Ver capítulo 11.</td></tr>
+        <tr><td><strong>Propuesta Bodegones</strong></td><td>Reposición del bodegón 1053 desde su almacén de origen, con filtros que armas tú y puedes guardar. Ver capítulo 10.</td></tr>
+        <tr><td><strong>Distribución</strong></td><td>Reparto de una factura de Mayorista 23 entre los cuatro bodegones, con sus scripts. Ver capítulo 10.</td></tr>
+        <tr><td><strong>U/C Pendientes</strong></td><td>Asignar las unidades por caja a los productos de cada almacén (guardado provisional). Ver capítulo 11.</td></tr>
+        <tr><td><strong>Propuesta FF</strong></td><td>Propuesta para los almacenes FF. En desarrollo (datos de ejemplo). Ver capítulo 11.</td></tr>
+        <tr><td><strong>Variables de Precios</strong></td><td>Parámetros globales del Precio Propuesto TKC (Admin y Supervisor). Ver capítulo 11.</td></tr>
+        <tr><td><strong>Usuarios</strong></td><td>Consulta de usuarios y roles (solo Admin); se gestionan en Identity. Ver capítulo 11.</td></tr>
+      </tbody>
+    </table>
+    <p>Las secciones <strong>Reab. Bodegones</strong> y <strong>Reab. FF</strong> las ven los roles Admin, Supervisor, Analista IC y Revisor; U/C Pendientes también lo ve Inventario.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔔</span> Notificaciones</h3>
+    <p>La campana en la barra superior muestra notificaciones en tiempo real:</p>
+    <table class="data-table">
+      <thead><tr><th>Quién</th><th>Qué notifica</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Comercial</strong></td><td>Pedidos que han sido aprobados por el Revisor y están listos para descargar.</td></tr>
+      </tbody>
+    </table>
+    <div class="tip"><span class="ico">✅</span><div>Al hacer clic en la notificación de un pedido aprobado, el sistema te lleva directamente al detalle de ese pedido y marca la notificación como leída.</div></div>
+  </div>
+</div>
+
+<!-- CAP 3 -->
+<div class="chapter" id="cap3">
+  <div class="chapter-header">
+    <div class="chapter-num">3</div>
+    <div class="chapter-title">Gestión de proveedores</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📋</span> Ver proveedores</h3>
+    <p>En la sección <strong>Proveedores</strong> verás la lista completa con nombre, código, tipo, país y estado. Usa la barra de búsqueda para filtrar por nombre o código.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">➕</span> Crear un proveedor</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample">+ Nuevo Proveedor</span> en la esquina superior derecha.</div></div>
+      <div class="step"><div class="step-body">Completa los campos del formulario. Los campos <strong>Nombre</strong> y <strong>Código</strong> son obligatorios.</div></div>
+      <div class="step"><div class="step-body">Agrega los <strong>Contactos</strong> usando el botón <kbd>+ Agregar Contacto</kbd> al final del formulario.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample">Guardar</span>. El proveedor aparecerá en la lista.</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✏️</span> Editar o desactivar un proveedor</h3>
+    <p>Haz clic sobre cualquier proveedor de la lista para abrir el formulario de edición. Para desactivar sin eliminar, desmarca el interruptor <strong>Activo</strong>.</p>
+    <div class="warning"><span class="ico">⚠️</span><div><strong>Atención:</strong> no se puede eliminar un proveedor que tenga ofertas o pedidos asociados.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📞</span> Seguimiento de contactos</h3>
+    <p>En la lista de proveedores, cada fila muestra dos badges de fechas: <strong>Próximo contacto</strong> (cuándo hay que llamar/escribir) y <strong>Último contacto</strong> (cuándo se contactó por última vez).</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Cuando hayas contactado a un proveedor, haz clic en <span class="btn-sample">Marcar contactado hoy</span> en su fila. El sistema registra la fecha y la hora automáticamente.</div></div>
+      <div class="step"><div class="step-body">Para programar el próximo contacto, edita el proveedor y ajusta el campo <strong>Próxima fecha de contacto</strong>.</div></div>
+      <div class="step"><div class="step-body">Todos los contactos registrados aparecen en la <strong>Agenda</strong> (ver capítulo 9) con un punto verde en el día correspondiente.</div></div>
+    </div>
+    <div class="tip"><span class="ico">✅</span><div>El historial de contactos te permite saber exactamente cuándo fue la última vez que te comunicaste con cada proveedor sin depender de la memoria o de apuntes externos.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📄</span> Campos del proveedor</h3>
+    <table class="data-table">
+      <thead><tr><th>Campo</th><th>Descripción</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Código</strong></td><td>Identificador único del proveedor (ej. EE118, TCP14).</td></tr>
+        <tr><td><strong>Tipo</strong></td><td>Clasificación: Empresa Extranjera, Empresa Nacional, Mipyme, TCP, etc.</td></tr>
+        <tr><td><strong>Comercialización</strong></td><td>Forma en que opera: Mayorista, Minorista, mixto.</td></tr>
+        <tr><td><strong>Moneda base</strong></td><td>Moneda habitual de este proveedor (USD, CUP, EUR).</td></tr>
+        <tr><td><strong>Contactos</strong></td><td>Nombre, cargo y teléfono de cada persona de contacto.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- CAP 4 -->
+<div class="chapter" id="cap4">
+  <div class="chapter-header">
+    <div class="chapter-num">4</div>
+    <div class="chapter-title">Ofertas de proveedores</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📄</span> ¿Qué es una oferta?</h3>
+    <p>Una oferta es la lista de precios que envía un proveedor. Cada proveedor tiene una <strong>oferta base</strong> que se actualiza cada vez que importas una nueva lista. La oferta base siempre crece — nunca pierde productos anteriores.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📥</span> Importar una nueva lista de precios</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Ve a <strong>Ofertas</strong> y busca la oferta del proveedor que quieres actualizar. Haz clic sobre ella.</div></div>
+      <div class="step"><div class="step-body">En la pestaña <strong>Importar</strong>, arrastra o selecciona el archivo Excel, CSV o PDF del proveedor.</div></div>
+      <div class="step"><div class="step-body">El sistema detecta automáticamente la fila de encabezados. Revisa que los campos estén correctamente asignados, especialmente <strong>Nombre del Producto</strong> y <strong>Precio</strong>.</div></div>
+      <div class="step"><div class="step-body">Si los encabezados no se detectan bien, usa los botones <kbd>−</kbd> <kbd>+</kbd> para cambiar en qué fila están.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample">Importar</span>. El sistema procesará el archivo y actualizará la oferta.</div></div>
+      <div class="step"><div class="step-body">Al terminar, aparecerá un <strong>modal de resumen</strong> con todos los cambios detectados.</div></div>
+    </div>
+    <div class="tip"><span class="ico">✅</span><div><strong>Comportamiento del import:</strong> Los productos existentes se actualizan si cambiaron. Los nuevos se agregan. Los que no aparecen en el nuevo archivo se conservan — nunca se borran.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📊</span> Modal de resumen del import</h3>
+    <table class="data-table">
+      <thead><tr><th>Categoría</th><th>Significado</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge green">Nuevos</span></td><td>Productos que no existían en la oferta y se agregaron.</td></tr>
+        <tr><td><span class="badge amber">Actualizados</span></td><td>Productos que existían y tuvieron cambios de precio u otros campos.</td></tr>
+        <tr><td><span class="badge gray">Sin cambios</span></td><td>Productos que existían y son idénticos en la nueva lista.</td></tr>
+        <tr><td><span class="badge blue">No en nueva lista</span></td><td>Productos de la oferta que no aparecen en este archivo. Se conservan.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🕐</span> Historial de precios por ítem</h3>
+    <p>En la pestaña <strong>Ítems</strong> de una oferta, cada fila tiene un ícono de reloj (🕐) al final. Al hacer clic muestra el historial completo de cambios de precio de ese producto:</p>
+    <table class="data-table">
+      <thead><tr><th>Información mostrada</th><th>Descripción</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Precio anterior → Nuevo precio</strong></td><td>El cambio exacto ocurrido.</td></tr>
+        <tr><td><strong>% de variación</strong></td><td>En rojo si subió, verde si bajó.</td></tr>
+        <tr><td><strong>Fecha y hora</strong></td><td>Cuándo se detectó el cambio durante la importación.</td></tr>
+        <tr><td><strong>Importado por</strong></td><td>El usuario que realizó la importación.</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><span class="ico">ℹ️</span><div>El historial se acumula automáticamente con cada importación. Si un ítem nunca ha tenido cambio de precio, el historial estará vacío.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔗</span> Emparejar productos con el catálogo</h3>
+    <p>Para generar propuestas de reabastecimiento, cada ítem de la oferta debe estar emparejado con su producto equivalente en el catálogo interno.</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">En la oferta, ve a la pestaña <strong>Asociación</strong>.</div></div>
+      <div class="step"><div class="step-body">Usa el filtro <kbd>Solo pendientes</kbd> para ver únicamente los ítems sin asociar.</div></div>
+      <div class="step"><div class="step-body">Busca el producto equivalente en el catálogo y haz clic en <span class="btn-sample">Guardar</span>.</div></div>
+    </div>
+    <div class="note"><span class="ico">ℹ️</span><div><strong>Multi-asociación (packs):</strong> Si el proveedor vende un pack que contiene varios productos distintos del catálogo, puedes añadir más de una asociación al mismo ítem. Cada asociación adicional aparece como un chip extra debajo del ítem en la pestaña Ítems.</div></div>
+    <div class="note"><span class="ico">ℹ️</span><div>Los productos migrados desde la hoja de cálculo original ya vienen con sus asociaciones. Solo necesitas asociar los nuevos productos que aparezcan en futuras importaciones.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✨</span> Marcar un ítem como Producto Nuevo</h3>
+    <p>Si un ítem del proveedor no tiene equivalente en el catálogo interno (producto que la tienda todavía no vende), el Comercial puede marcarlo explícitamente como <strong>Producto Nuevo</strong> en lugar de dejarlo pendiente.</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">En la pestaña <strong>Asociación</strong>, localiza el ítem que no puede asociarse a ningún producto del catálogo.</div></div>
+      <div class="step"><div class="step-body">Haz clic en <span class="btn-sample amber">Marcar como Nuevo</span>. El ítem se resalta con borde ámbar y muestra el badge <span class="badge amber">NUEVO</span>. El buscador de catálogo se oculta — este producto no necesita asociación.</div></div>
+      <div class="step"><div class="step-body">Para deshacer, haz clic en <span class="btn-sample outline">Desmarcar</span> en el mismo ítem.</div></div>
+    </div>
+    <div class="tip"><span class="ico">💡</span><div>Los ítems marcados como Nuevos pasan automáticamente a la sección <strong>Productos Nuevos</strong> al final de la pestaña Propuesta &amp; Pedido, donde el Comercial puede asignarles una cantidad manualmente.</div></div>
+    <div class="warning"><span class="ico">⚠️</span><div><strong>Solo marcar los que correspondan:</strong> Los ítems pendientes de asociación normal <em>no</em> pasan a Propuesta — solo los que se marquen explícitamente como Nuevos. No usar este botón como atajo para saltarse la asociación.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🏷️</span> Estados de una oferta</h3>
+    <table class="data-table">
+      <thead><tr><th>Estado</th><th>Significado</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge gray">Borrador</span></td><td>Oferta creada pero sin ítems importados.</td></tr>
+        <tr><td><span class="badge blue">Importada</span></td><td>Ítems cargados, pendiente de emparejamiento.</td></tr>
+        <tr><td><span class="badge amber">Asoc. parcial</span></td><td>Algunos ítems emparejados, otros no.</td></tr>
+        <tr><td><span class="badge green">Asociada</span></td><td>Todos los ítems tienen su producto del catálogo.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- CAP 5 -->
+<div class="chapter" id="cap5">
+  <div class="chapter-header">
+    <div class="chapter-num">5</div>
+    <div class="chapter-title">Propuesta de reabastecimiento</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🧮</span> ¿Cómo funciona la propuesta?</h3>
+    <p>El sistema calcula automáticamente cuánto pedir de cada producto usando el <strong>stock actual</strong> y el <strong>índice de ventas diarias</strong>. La propuesta cubre entre los días mínimos y máximos de inventario configurados.</p>
+    <table class="data-table">
+      <thead><tr><th>Estado de stock</th><th>Significado</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge red">AGOTADO</span></td><td>Sin unidades disponibles. Pedir urgente.</td></tr>
+        <tr><td><span class="badge amber">DÉFICIT</span></td><td>Stock por debajo del mínimo. Pedir pronto.</td></tr>
+        <tr><td><span class="badge green">GARANTIZADO</span></td><td>Stock adecuado. El sistema puede no sugerir pedir.</td></tr>
+        <tr><td><span class="badge blue">EXCESO</span></td><td>Stock por encima del máximo recomendado.</td></tr>
+        <tr><td><span class="badge gray">SIN VENTAS</span></td><td>Sin historial de ventas. Ajustar manualmente.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📝</span> Generar y ajustar una propuesta</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">En la oferta, ve a la pestaña <strong>Propuesta &amp; Pedido</strong>.</div></div>
+      <div class="step"><div class="step-body">Revisa la columna <strong>Sugerido</strong> — es la cantidad que el sistema recomienda pedir.</div></div>
+      <div class="step"><div class="step-body">Si quieres ajustar una cantidad, modifica el campo <strong>Cant. Final</strong>. El sistema marcará el ítem con ajuste manual.</div></div>
+      <div class="step"><div class="step-body">Si el producto tiene múltiplo de caja (Múlt: X), asegúrate de que la cantidad sea múltiplo de ese número.</div></div>
+      <div class="step"><div class="step-body">Cuando estés conforme, pulsa <span class="btn-sample">Crear Orden de Compra</span>.</div></div>
+    </div>
+    <div class="tip"><span class="ico">💡</span><div><strong>Múltiplo de caja:</strong> Si un producto tiene Múlt: 6, solo puedes pedir en grupos de 6 (6, 12, 18...). El sistema te avisa en naranja si la cantidad no cuadra.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✨</span> Bloque Productos Nuevos en la propuesta</h3>
+    <p>Al final de la tabla de propuesta aparece un bloque separado con fondo ámbar titulado <strong>Productos Nuevos — sin asociación interna</strong>. Aquí se listan todos los ítems del proveedor que el Comercial marcó como Nuevo en la pestaña Asociación.</p>
+    <table class="data-table">
+      <thead><tr><th>Columna</th><th>Descripción</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Cód. Proveedor</strong></td><td>Código que el proveedor asigna a este producto.</td></tr>
+        <tr><td><strong>Nombre del Producto</strong></td><td>Nombre tal como aparece en la lista del proveedor.</td></tr>
+        <tr><td><strong>Precio Unit.</strong></td><td>Precio ofertado por el proveedor.</td></tr>
+        <tr><td><strong>Mín. / Múlt.</strong></td><td>Cantidades mínimas y múltiplos definidos por el proveedor.</td></tr>
+        <tr><td><strong>Cant. Final ✍</strong></td><td>Cantidad que el Comercial decide pedir. No hay sugerencia automática — el criterio es 100% manual.</td></tr>
+        <tr><td><strong>Subtotal</strong></td><td>Cantidad × precio. Se suma al total general del pedido.</td></tr>
+      </tbody>
+    </table>
+    <div class="steps">
+      <div class="step"><div class="step-body">Activa o desactiva cada ítem nuevo con el checkbox de la primera columna. También hay un checkbox de cabecera para seleccionar/deseleccionar todos a la vez.</div></div>
+      <div class="step"><div class="step-body">Introduce la cantidad en el campo <strong>Cant. Final</strong>. No hay propuesta automática — decides tú cuánto pedir basándote en tus criterios.</div></div>
+      <div class="step"><div class="step-body">El botón <span class="btn-sample">Generar Pedido</span> se habilita incluso si solo hay ítems nuevos (sin ítems asociados incluidos). El contador del botón incluye los nuevos.</div></div>
+    </div>
+    <div class="note"><span class="ico">ℹ️</span><div>En el PDF del pedido que recibirá el proveedor, los productos nuevos aparecen exactamente igual que el resto de los ítems — sin ningún indicador especial. La diferenciación "NUEVO" es solo interna.</div></div>
+  </div>
+</div>
+
+<!-- CAP 6 -->
+<div class="chapter" id="cap6">
+  <div class="chapter-header">
+    <div class="chapter-num">6</div>
+    <div class="chapter-title">Órdenes de compra</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📋</span> Ver pedidos de compra</h3>
+    <p>En la sección <strong>Pedidos de Compra</strong> verás los pedidos con su estado operativo y su estado de aprobación. El <strong>Comercial</strong> solo ve sus propios pedidos. El <strong>Analista IC</strong> y el <strong>Revisor</strong> ven todos los pedidos del sistema.</p>
+    <table class="data-table">
+      <thead><tr><th>Badge operativo</th><th>Significado</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge gray">Borrador</span></td><td>Recién creado, aún no enviado para revisión.</td></tr>
+        <tr><td><span class="badge blue">Confirmado</span></td><td>Aprobado internamente, listo para enviar al proveedor.</td></tr>
+        <tr><td><span class="badge blue">Enviado</span></td><td>Ya fue enviado al proveedor.</td></tr>
+        <tr><td><span class="badge red">Cancelado</span></td><td>El pedido fue anulado.</td></tr>
+      </tbody>
+    </table>
+    <table class="data-table" style="margin-top:8px;">
+      <thead><tr><th>Badge de aprobación</th><th>Significado</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge purple">En revisión IC</span></td><td>Enviado al equipo de Inteligencia Comercial.</td></tr>
+        <tr><td><span class="badge amber">Pend. Revisor</span></td><td>El Analista IC ya revisó. Esperando aprobación del Revisor.</td></tr>
+        <tr><td><span class="badge green">Aprobado</span></td><td>El Revisor aprobó. El Comercial puede descargarlo.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🏷️</span> Badge NUEVO en el detalle del pedido</h3>
+    <p>Los ítems marcados como Producto Nuevo en la oferta aparecen en la lista del pedido con un badge <span class="badge amber">NUEVO</span> junto al nombre. Esto identifica internamente qué líneas son productos que no existían en el catálogo al momento del pedido.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📦</span> Vista Proveedor</h3>
+    <p>En el detalle del pedido, el botón <span class="btn-sample outline">📦 Vista proveedor ↓</span> (junto al encabezado de la sección de ítems) despliega una vista agrupada del pedido tal como lo verá el proveedor.</p>
+    <table class="data-table">
+      <thead><tr><th>Diferencia con la vista interna</th><th>Descripción</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Agrupado por ítem de oferta</strong></td><td>Los pedidos de pack (un ítem del proveedor asociado a múltiples productos internos) aparecen como una sola línea con la cantidad sumada.</td></tr>
+        <tr><td><strong>Muestra datos del proveedor</strong></td><td>Código del proveedor, nombre del proveedor y precio ofertado — no los datos internos del catálogo.</td></tr>
+      </tbody>
+    </table>
+    <div class="tip"><span class="ico">✅</span><div>Usa Vista Proveedor antes de descargar el PDF para verificar que los ítems y cantidades son correctos desde la perspectiva del proveedor.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📄</span> Descargar PDF de la orden</h3>
+    <p>El botón <span class="btn-sample outline">Descargar PDF</span> está disponible para el <strong>Comercial únicamente cuando el pedido ha sido aprobado</strong>. El Admin, Analista IC y Revisor pueden descargarlo en cualquier momento para revisión.</p>
+    <div class="note"><span class="ico">ℹ️</span><div><strong>PDF agrupado por producto del proveedor:</strong> En el PDF que se envía al proveedor, cada línea corresponde a un ítem de su lista. Si se pedían varias referencias internas mapeadas al mismo ítem del proveedor (pack), las cantidades se suman en una sola línea. El proveedor nunca ve duplicados.</div></div>
+    <div class="note"><span class="ico">ℹ️</span><div>Una vez procesada la confirmación del proveedor, el botón cambia a <strong>Descargar Confirmación</strong> y genera un PDF con solo los ítems aceptados.</div></div>
+  </div>
+</div>
+
+<!-- CAP 7 -->
+<div class="chapter" id="cap7">
+  <div class="chapter-header">
+    <div class="chapter-num">7</div>
+    <div class="chapter-title">Flujo de aprobación</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔄</span> Visión general del flujo</h3>
+    <div class="approval-flow">
+      <div class="af-step comercial">
+        <div class="label">Comercial</div>
+        <div class="name">Crea el pedido<br>y lo envía</div>
+      </div>
+      <div class="af-step ic">
+        <div class="label">Analista IC</div>
+        <div class="name">Revisa y ajusta<br>cantidades</div>
+      </div>
+      <div class="af-step revisor">
+        <div class="label">Revisor</div>
+        <div class="name">Ajuste final<br>y aprobación</div>
+      </div>
+      <div class="af-step done">
+        <div class="label">Comercial</div>
+        <div class="name">Recibe notificación<br>y descarga PDF</div>
+      </div>
+    </div>
+    <div class="note"><span class="ico">ℹ️</span><div>El Comercial puede enviar el pedido directamente al Revisor, saltando la revisión del Analista IC, cuando la situación lo requiera.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📤</span> Lo que hace el Comercial</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Después de crear el pedido desde la propuesta, entra al detalle del pedido en <strong>Pedidos de Compra</strong>.</div></div>
+      <div class="step"><div class="step-body">Verá dos botones en la parte superior:<br>
+        — <span class="btn-sample purple">Enviar a IC</span> para que el equipo de Inteligencia Comercial lo revise primero.<br>
+        — <span class="btn-sample">Enviar directo a Revisor</span> para saltar la revisión IC cuando sea urgente.</div></div>
+      <div class="step"><div class="step-body">Una vez enviado, el pedido queda bloqueado para el Comercial. El badge de aprobación pasa a <span class="badge purple">En revisión IC</span> o <span class="badge amber">Pend. Revisor</span> según la opción elegida.</div></div>
+      <div class="step"><div class="step-body">Cuando el Revisor aprueba, aparecerá una <strong>notificación en la campana 🔔</strong> con el mensaje: <em>"Pedido #{número} aprobado — listo para descargar."</em></div></div>
+      <div class="step"><div class="step-body">Haz clic en la notificación para ir al pedido. El botón <span class="btn-sample outline">Descargar PDF</span> ahora está disponible en la cabecera del detalle.</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔍</span> Lo que hace el Analista IC</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">En <strong>Pedidos de Compra</strong> verás todos los pedidos del sistema. Identifica los que tienen el badge <span class="badge purple">En revisión IC</span>.</div></div>
+      <div class="step"><div class="step-body">Abre el pedido. En la pestaña <strong>Líneas del Pedido</strong> aparece un aviso indicando que puedes revisar y ajustar cantidades.</div></div>
+      <div class="step"><div class="step-body">En la columna <strong>Cant. Final</strong>, los valores son editables directamente en la tabla. Modifica los que consideres necesario según tu análisis.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample purple">Guardar y enviar a Revisor</span>. Los cambios de cantidad se guardan automáticamente junto con el cambio de estado.</div></div>
+    </div>
+    <div class="tip"><span class="ico">✅</span><div>Si modificas una cantidad, el subtotal de esa línea y el total del pedido se recalculan automáticamente al guardar.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✅</span> Lo que hace el Revisor</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">En <strong>Pedidos de Compra</strong> busca los pedidos con badge <span class="badge amber">Pend. Revisor</span> (también puede ver los de <span class="badge purple">En revisión IC</span> si llegaron directamente del Comercial).</div></div>
+      <div class="step"><div class="step-body">Abre el pedido. La columna <strong>Cant. Final</strong> es editable. Realiza los ajustes finales que correspondan.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample green">Guardar y aprobar pedido</span>. El pedido cambia a <span class="badge green">Aprobado</span> y el Comercial recibe una notificación inmediata en su campana.</div></div>
+    </div>
+    <div class="warning"><span class="ico">⚠️</span><div><strong>La aprobación es definitiva.</strong> Una vez aprobado, el pedido queda en estado <em>Confirmado</em> y el Comercial puede proceder a descargarlo y enviarlo al proveedor.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🏷️</span> Registro de auditoría</h3>
+    <p>Cuando el Analista IC envía al Revisor, el sistema registra automáticamente <strong>quién</strong> realizó la revisión y <strong>cuándo</strong>. Del mismo modo, la aprobación del Revisor queda registrada con nombre y fecha/hora en la cabecera del pedido.</p>
+  </div>
+</div>
+
+<!-- CAP 8 -->
+<div class="chapter" id="cap8">
+  <div class="chapter-header">
+    <div class="chapter-num">8</div>
+    <div class="chapter-title">Confirmación del proveedor</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📥</span> ¿Qué es la confirmación?</h3>
+    <p>Cuando el proveedor responde con las cantidades que puede entregar (que pueden diferir de lo pedido), el Comercial importa ese archivo para compararlo con la orden original y tomar decisiones de aceptación o rechazo.</p>
+    <div class="note"><span class="ico">ℹ️</span><div>La confirmación del proveedor <strong>solo está disponible después de que el pedido ha sido aprobado</strong> por el Revisor. Si el pedido aún está en revisión, esta sección estará bloqueada.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📤</span> Importar la confirmación</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">En el detalle del pedido aprobado, ve a la pestaña <strong>Confirmación Proveedor</strong>.</div></div>
+      <div class="step"><div class="step-body">Arrastra o selecciona el archivo que envió el proveedor (Excel, CSV o PDF).</div></div>
+      <div class="step"><div class="step-body">Mapea las columnas. Al menos <strong>Cantidad Confirmada</strong> es obligatoria. El código o nombre sirve para el emparejamiento.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample">Ver coincidencias</span> para previsualizar el emparejamiento. Si todo está bien, pulsa <span class="btn-sample">Confirmar e importar</span>.</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✔️</span> Revisar diferencias y tomar decisiones</h3>
+    <p>Después de importar, verás la tabla de diferencias. Para cada ítem donde la cantidad confirmada difiere de la pedida, debes tomar una decisión:</p>
+    <table class="data-table">
+      <thead><tr><th>Decisión</th><th>Efecto</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge green">Acepto</span></td><td>Aceptas la cantidad que puede entregar el proveedor.</td></tr>
+        <tr><td><span class="badge red">Rechazo</span></td><td>No aceptas esa cantidad. El ítem queda excluido del pedido final.</td></tr>
+      </tbody>
+    </table>
+    <div class="steps">
+      <div class="step"><div class="step-body">Revisa cada ítem. Usa <span class="btn-sample outline">Aceptar todo</span> si quieres aceptar todas las cantidades de una vez.</div></div>
+      <div class="step"><div class="step-body">Cuando hayas decidido sobre todos, pulsa <span class="btn-sample">Guardar Decisiones</span>.</div></div>
+      <div class="step"><div class="step-body">El botón de PDF cambiará a <span class="btn-sample outline">Descargar Confirmación</span> — descárgalo para tener la orden final con solo los ítems aceptados.</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📄</span> PDF de Pedido Confirmado</h3>
+    <p>Este documento contiene únicamente los ítems que aceptaste. Muestra la <strong>cantidad pedida original</strong> y la <strong>cantidad confirmada</strong> lado a lado, con el total recalculado. Es el documento que certifica lo que el proveedor va a entregar.</p>
+  </div>
+</div>
+
+<!-- CAP AGENDA -->
+<div class="chapter" id="cap-agenda">
+  <div class="chapter-header">
+    <div class="chapter-num">9</div>
+    <div class="chapter-title">Agenda</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📅</span> ¿Para qué sirve la Agenda?</h3>
+    <p>La Agenda es el calendario del módulo de Reabastecimiento. Concentra en una sola vista los <strong>contactos programados con proveedores</strong>, los <strong>contactos ya realizados</strong> y los <strong>pagos pendientes de pedidos</strong>.</p>
+    <div class="flow">
+      <div class="flow-step" style="background:#1D6FDB;">Punto azul</div>
+      <span style="padding:0 10px; color:#4A6278; font-size:13px;">→ Próximo contacto programado</span>
+      <div class="flow-step ok">Punto verde</div>
+      <span style="padding:0 10px; color:#4A6278; font-size:13px;">→ Contacto realizado ese día</span>
+      <div class="flow-step" style="background:#6D28D9;">Punto morado</div>
+      <span style="padding:0 10px; color:#4A6278; font-size:13px;">→ Pago de pedido pendiente</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🗓️</span> Cómo usar la Agenda</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Ve a <strong>Agenda</strong> en el menú lateral (sección Reabastecimiento).</div></div>
+      <div class="step"><div class="step-body">Navega entre meses con las flechas del calendario. Los días que tienen eventos muestran puntos de color debajo del número del día.</div></div>
+      <div class="step"><div class="step-body">Haz clic en cualquier día para ver el detalle de los eventos de esa fecha en el panel lateral.</div></div>
+      <div class="step"><div class="step-body">Para registrar un contacto realizado hoy, ve a <strong>Proveedores</strong> y haz clic en <span class="btn-sample">Marcar contactado hoy</span> en la fila del proveedor correspondiente. Aparecerá automáticamente en la Agenda con un punto verde.</div></div>
+    </div>
+    <div class="tip"><span class="ico">✅</span><div>El Dashboard tiene un enlace rápido a la Agenda para que puedas acceder a ella sin navegar por el menú.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔔</span> Panel de Alertas — déficit de alta venta</h3>
+    <p>La sección <strong>Alertas</strong> incluye un panel que muestra los productos de alta rotación que están en estado de déficit en los almacenes configurados para tu usuario. Este panel filtra automáticamente por los almacenes asignados al Comercial — no muestra el catálogo completo.</p>
+    <div class="note"><span class="ico">ℹ️</span><div>Si el panel aparece vacío, puede deberse a que no tienes almacenes configurados en tu perfil. Solicita al administrador que te asigne los almacenes correspondientes.</div></div>
+  </div>
+</div>
+
+<!-- CAP 10 BODEGONES -->
+<div class="chapter" id="cap-bodegones">
+  <div class="chapter-header">
+    <div class="chapter-num">10</div>
+    <div class="chapter-title">Reabastecimiento de Bodegones</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🏬</span> ¿Qué son los Bodegones?</h3>
+    <p>Los Bodegones son cuatro almacenes que se abastecen entre sí: el <strong>1053</strong> (principal) y los bodegones <strong>1201</strong>, <strong>1882</strong> y <strong>1883</strong>. El menú lateral tiene una sección <strong>Reab. Bodegones</strong> con dos pantallas de trabajo:</p>
+    <table class="data-table">
+      <thead><tr><th>Pantalla</th><th>Para qué sirve</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Propuesta Bodegones</strong></td><td>Revisa el stock del bodegón 1053 y propone qué reponer desde su almacén de origen. Es el equivalente a la tabla dinámica de Oreste.</td></tr>
+        <tr><td><strong>Distribución</strong></td><td>Toma la factura PDF de Mayorista 23 (SM23) y reparte lo comprado entre los cuatro bodegones, generando los scripts para el sistema de inventario.</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><span class="ico">ℹ️</span><div>Estas pantallas las ven los roles <strong>Admin, Supervisor, Analista IC y Revisor</strong>. La pantalla U/C Pendientes se describe en el capítulo 11.</div></div>
+    <div class="flow">
+      <div class="flow-step">Factura<br>SM23 (PDF)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Asociar<br>códigos TKC</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Propuesta de<br>distribución</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step ic">Ajustar<br>cajas</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step ok">Scripts AA y<br>Transferencias</div>
+    </div>
+  </div>
+
+  <!-- ───── PROPUESTA BODEGONES ───── -->
+  <div class="section">
+    <h3><span class="ico">📊</span> Propuesta Bodegones — para qué sirve</h3>
+    <p>Muestra todos los productos del bodegón 1053 con su stock, su ritmo de venta, cuántos días de cobertura le quedan y de qué almacén se repone (su <strong>origen</strong>). A partir de eso calcula una <strong>Propuesta Ideal</strong> en unidades y permite registrar las cantidades que se aprueban para pedir al origen.</p>
+    <div class="tip"><span class="ico">✅</span><div>Los datos se guardan en memoria unos minutos. La primera vez que entras puede tardar mientras se cargan productos, índices y orígenes; al volver a la pantalla los datos aparecen al instante y se actualizan en segundo plano.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📈</span> Índices de venta e I.AVG</h3>
+    <p>La franja <strong>Índices de venta</strong> define con qué ritmo de ventas se calculan la cobertura y la propuesta. Por defecto trae tres índices: <strong>P.≥½</strong> (Prom. Diario ≥ max/2), <strong>P.&gt;0</strong> (Prom. Diario &gt; 0) y <strong>P.1m</strong> (Prom. Diario Últ. 1 mes).</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Cambia un índice abriendo su desplegable y eligiendo otro.</div></div>
+      <div class="step"><div class="step-body">Quita un índice con la <strong>×</strong> a su derecha, o añade otro con <span class="btn-sample outline">+ Agregar</span>.</div></div>
+      <div class="step"><div class="step-body">Revisa a la derecha el texto <strong>I.AVG = promedio de N índice(s)</strong>: el I.AVG de cada producto es el promedio simple de los índices que tengas seleccionados.</div></div>
+    </div>
+    <p>La columna <strong>Cat.</strong> (A, B, C, D) clasifica el producto por ventas diarias: A desde 1 unidad/día, B desde 0.6, C desde 0.2 y D por debajo de 0.2. Se calcula siempre con los tres índices por defecto, aunque cambies el panel.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔎</span> Filtros y vistas guardadas</h3>
+    <p>Ya no hay un "Filtro Oreste" fijo: todos los filtros son independientes y cada usuario los combina como quiera.</p>
+    <table class="data-table">
+      <thead><tr><th>Filtro</th><th>Para qué sirve</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Reabastecimiento</strong></td><td><em>Interno (bodegones)</em>: el producto sale de otro almacén. <em>Externo (SM23M)</em>: se compra a un proveedor externo; ese origen sale de las facturas externas ya cargadas en Distribución Externos.</td></tr>
+        <tr><td><strong>Todos los orígenes</strong></td><td>Elige uno o varios almacenes de origen concretos, proveedores externos o "Sin origen".</td></tr>
+        <tr><td><strong>Estados / Categorías</strong></td><td>Desplegables para filtrar por uno o varios estados (Agotado, Déficit…) y categorías de ventas (A–D).</td></tr>
+        <tr><td><strong>Condiciones</strong></td><td>Reglas numéricas que armas tú con <em>Agregar condición</em>: escoge el dato (Cobertura en días, Prop. Ideal, Exist. Origen, Cant. en tienda origen, Stock 1053, I.AVG, U/C), el operador (menor que, mayor que, igual, entre…) y el valor. Se combinan todas a la vez. Una condición sin valor todavía no filtra.</td></tr>
+        <tr><td><strong>Buscador</strong></td><td>Código TKC exacto, ID de tienda, parte del nombre o parte del nombre que vino en la factura del proveedor externo.</td></tr>
+      </tbody>
+    </table>
+    <p>Por ejemplo, el antiguo filtro de Oreste se arma con cuatro condiciones: Cobertura &lt; 20, Exist. Origen &gt; 1, Prop. Ideal &gt; 1 y Cant. en tienda origen &gt; 1.</p>
+    <div class="warning"><span class="ico">⚠️</span><div><strong>Importante:</strong> <em>Exist. Origen</em> y <em>Cant. en tienda origen</em> solo aplican a productos de origen interno; los externos no tienen esos datos y no se filtran por ellas. Además, <em>Cant. en tienda origen</em> todavía no se recibe del servidor (está pedido al backend): si agregas esa condición, un aviso indica que no se aplicó.</div></div>
+    <p><strong>Mis vistas:</strong> cuando tengas una combinación de filtros que uses seguido, pulsa <span class="btn-sample">Mis vistas</span> → <em>Guardar filtros actuales como nueva vista…</em> y ponle un nombre. La próxima vez solo la eliges en la lista. Una vista guarda los filtros, las condiciones, el umbral de cobertura, la búsqueda y los índices de venta. Si cambias algo después de aplicarla, aparece un punto junto a su nombre y puedes <em>Actualizar</em> la vista. Cada usuario tiene las suyas.</p>
+    <p>La barra incluye además el <strong>Cob. umbral</strong> (5d, 10d o 15d; por defecto 15d). Define a partir de cuántos días de cobertura un producto pasa a Déficit y cuántos días de stock cubre la Propuesta Ideal. <em>No filtra filas</em>; para filtrar por cobertura usa una condición.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🏷️</span> Estados de stock</h3>
+    <table class="data-table">
+      <thead><tr><th>Estado</th><th>Cuándo aparece</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge red">AGOTADO</span></td><td>Stock en 0 y el producto tiene ventas.</td></tr>
+        <tr><td><span class="badge amber">DÉFICIT</span></td><td>La cobertura es menor que el umbral (15 días por defecto).</td></tr>
+        <tr><td><span class="badge green">GARANTIZADO</span></td><td>La cobertura está entre el umbral y 3 veces el umbral.</td></tr>
+        <tr><td><span class="badge blue">EXCESO</span></td><td>La cobertura supera 3 veces el umbral.</td></tr>
+        <tr><td><span class="badge gray">SIN VENTAS</span></td><td>Hay stock pero el producto no tiene índice de ventas.</td></tr>
+        <tr><td><span class="badge amber">AGOT. SV.</span></td><td>Stock en 0 y sin ventas.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🗂️</span> Columnas de la tabla</h3>
+    <p>La tabla está dividida en tres secciones, separadas por una línea gruesa de color:</p>
+    <table class="data-table">
+      <thead><tr><th>Sección</th><th>Columnas y significado</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Producto y stock</strong></td>
+          <td>
+            <strong>Origen</strong>: almacén del que se repone el producto (por ejemplo 593 o 789), <em>SM23 M.</em> si se compra directo a SM23, o <em>Sin origen</em>. · <strong>Estado</strong> y <strong>Cat.</strong> · <strong>Cód. TKC</strong>, <strong>Nombre</strong>, <strong>Suministrador</strong> · <strong>Stock 1053</strong>: existencia actual en el bodegón · <strong>U/C</strong>: unidades por caja (en rojo "falta" si no está registrado) · <strong>I.AVG</strong>: ritmo de venta diario · <strong>Cob.(días)</strong>: Stock ÷ I.AVG · <strong>Exist. Origen</strong>: existencia en el almacén de origen.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Propuesta y aprobación</strong></td>
+          <td>
+            <strong>Prop. Ideal</strong>: unidades para cubrir el umbral de días, es decir I.AVG × días del umbral − stock (nunca negativa) · <strong>Rev. Cardista</strong>: cantidad que anota el cardista · <strong>Aprobación INV</strong>: cantidad que aprueba Inventario.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Script</strong></td>
+          <td><strong>Para script</strong>: aparece como <kbd>código*cantidad</kbd> cuando hay una cantidad en Aprobación INV, listo para usar en el sistema de inventario.</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tip"><span class="ico">✅</span><div>Los nombres de las columnas se pueden seleccionar con el cursor y copiar, por si necesitas pegarlos en otro documento.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✍️</span> Registrar cantidades y generar el pedido BT</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Filtra la lista (con tus condiciones o una vista guardada) y revisa cada producto: estado, cobertura, existencia en el origen y Prop. Ideal.</div></div>
+      <div class="step"><div class="step-body">Escribe la cantidad en <strong>Rev. Cardista</strong> y/o <strong>Aprobación INV</strong>. Solo pueden editar estas columnas el Admin, el Supervisor y los usuarios con rol de cardista (Rev. Cardista) o inventarista (Aprobación INV); el resto las ve en solo lectura.</div></div>
+      <div class="step"><div class="step-body">Cuando tengas cantidades aprobadas, pulsa <span class="btn-sample">Generar Pedido BT</span>. El botón muestra cuántos productos están aprobados y se activa solo si hay alguno.</div></div>
+      <div class="step"><div class="step-body">El pedido queda en <strong>Historial de Pedidos BT</strong>, al pie de la pantalla, con fecha, usuario, total de unidades y el script completo.</div></div>
+    </div>
+    <div class="warning"><span class="ico">⚠️</span><div>El Historial de Pedidos BT solo existe durante la sesión actual y el pedido todavía <strong>no se envía</strong> automáticamente al sistema de inventario: copia el script desde ahí. Las cantidades de Rev. Cardista y Aprobación INV tampoco se guardan al cerrar o recargar la pantalla.</div></div>
+    <p>El botón <span class="btn-sample green">Excel</span> descarga la lista que estás viendo (con los filtros aplicados) en un archivo <em>propuesta_bodegones_1053_fecha.xlsx</em>, que incluye las cantidades escritas y el script de cada producto.</p>
+  </div>
+
+  <!-- ───── DISTRIBUCIÓN ───── -->
+  <div class="section">
+    <h3><span class="ico">🔀</span> Distribución — para qué sirve</h3>
+    <p>La pantalla <strong>Distribución</strong> convierte una factura de <strong>Mayorista 23</strong> en un reparto de cajas entre los bodegones 1053, 1201, 1882 y 1883, y prepara los scripts para registrar el movimiento en el sistema de inventario: primero el <strong>Ajuste AA</strong> que da entrada a todo lo recibido en el 1053 y después las <strong>transferencias</strong> a los otros tres bodegones.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📄</span> Importar la factura</h3>
+    <div class="steps">
+      <div class="step"><div class="step-body">Entra a <strong>Distribución</strong> y arrastra el PDF de la factura de Mayorista 23 a la zona punteada, o haz clic para seleccionarlo.</div></div>
+      <div class="step"><div class="step-body">El sistema lee cada producto: nombre, cajas facturadas, precio por caja y las unidades por caja (U/C), que toma del propio nombre, por ejemplo <em>(24 x 395 g)</em> → 24.</div></div>
+      <div class="step"><div class="step-body">Arriba verás el número de orden, la fecha, el total de la factura y los contadores: productos, códigos asociados (por ejemplo 3/21), unidades totales e importe.</div></div>
+    </div>
+    <div class="warning"><span class="ico">⚠️</span><div>Si la suma de los productos leídos no coincide con el <strong>Total Productos</strong> de la factura, aparece un aviso rojo <em>"Verifica los productos importados"</em> con ambos montos. Significa que falta o sobra algún producto; revisa la factura antes de seguir.</div></div>
+    <p>Con el botón <span class="btn-sample outline">PDF</span> puedes cargar otra factura, con <span class="btn-sample outline">✕</span> limpiar la pantalla y empezar de nuevo.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🔗</span> Asociar cada producto con su código TKC</h3>
+    <p>Para que un producto entre en la propuesta debe tener su <strong>Cód. TKC</strong>. Hay cuatro formas de asignarlo:</p>
+    <table class="data-table">
+      <thead><tr><th>Forma</th><th>Cómo se hace</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Automática</strong></td><td>Si el nombre ya se asoció en una factura anterior, el código aparece solo al importar.</td></tr>
+        <tr><td><strong>Buscar por nombre</strong></td><td>Pulsa la lupa junto al código, escribe parte del nombre y elige el resultado.</td></tr>
+        <tr><td><strong>Escribir el código</strong></td><td>Escríbelo en la celda <em>Cód. TKC</em> y sal de la celda (o pulsa <kbd>Enter</kbd>). El sistema comprueba que exista en el catálogo.</td></tr>
+        <tr><td><strong>CodInicial</strong></td><td>Para productos nuevos: escribe los últimos 6 dígitos del código en la columna <em>CodInicial</em> y pulsa <kbd>Enter</kbd>. El sistema busca el código completo.</td></tr>
+      </tbody>
+    </table>
+    <p>Si el CodInicial coincide con varios códigos, se muestran todos para que elijas el correcto. Si no coincide con ninguno, aparece un aviso.</p>
+    <p>Cuando una fila tiene código, debajo del nombre de la factura aparece en azul el <strong>nombre del producto en TKC</strong> (<em>TKC: …</em>), para confirmar que es el producto correcto.</p>
+    <div class="note"><span class="ico">ℹ️</span><div><strong>El sistema recuerda las asociaciones.</strong> Cada vez que asocias un código se guarda la regla "este nombre de la factura = este código", y vale para todos los usuarios y todas las facturas. Si más adelante asocias otro código al mismo nombre, la regla se actualiza y el aviso te indica el código anterior y el nuevo.</div></div>
+    <div class="warning"><span class="ico">⚠️</span><div>Si escribes un código que <strong>no existe</strong> en el catálogo, aparece <em>"Código no encontrado"</em> y la asociación no se guarda. La regla recuerda el nombre original de la factura, aunque edites el nombre en la tabla.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">✨</span> Marcar productos Nuevos y Creados</h3>
+    <p>Dos casillas llevan el control de los productos que no existen aún en el inventario:</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Marca <strong>Nuevo</strong> en los productos que hay que darles de alta.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample outline">Exportar nuevos (N)</span>. Se descarga un Excel con CodInicial, código, nombre de la factura, nombre TKC, U/C, cajas, precio y total de unidades de esos productos.</div></div>
+      <div class="step"><div class="step-body">Cuando el cliente les dé entrada, marca <strong>Creado</strong> en cada uno.</div></div>
+    </div>
+    <p>El filtro <strong>Mostrar</strong> te ayuda a seguir el proceso:</p>
+    <table class="data-table">
+      <thead><tr><th>Opción</th><th>Muestra</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Todos</strong></td><td>Todas las filas.</td></tr>
+        <tr><td><strong>Nuevos</strong></td><td>Las filas marcadas como Nuevo.</td></tr>
+        <tr><td><strong>Creados</strong></td><td>Las filas marcadas como Creado.</td></tr>
+        <tr><td><strong>Pendientes</strong></td><td>Las marcadas como Nuevo que todavía no están Creadas, es decir, las que faltan por dar entrada.</td></tr>
+      </tbody>
+    </table>
+    <p>El cuadro <em>Buscar por nombre o código…</em> filtra por nombre de la factura, código, CodInicial o nombre TKC. Si hay filtros activos, aparece "Mostrando X de Y".</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🧮</span> Calcular la propuesta de distribución</h3>
+    <p>Con los códigos asociados, pulsa <span class="btn-sample purple">Propuesta</span>. Para cada producto con código, el sistema hace lo siguiente en cada uno de los cuatro bodegones:</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Calcula su <strong>ritmo de venta (I.AVG)</strong> como el promedio de tres valores: Prom. Diario Últ. 6 meses y Prom. Diario &gt; 0 (este último cuenta dos veces).</div></div>
+      <div class="step"><div class="step-body">Calcula cuánto necesita para tener <strong>30 días</strong> de ventas, teniendo en cuenta el stock actual de ese bodegón, y lo redondea hacia arriba a cajas completas (múltiplos del U/C). Es la misma fórmula de la columna "Propuesta" de la hoja de cálculo del cliente.</div></div>
+      <div class="step"><div class="step-body">Suma lo que necesitan los cuatro y reparte las cajas recibidas (<strong>Rec/C</strong>) en proporción a lo que necesita cada uno. La suma siempre da exactamente las cajas recibidas.</div></div>
+    </div>
+    <p>Un bodegón que ya tiene exceso de stock no recibe cajas. Si ningún bodegón necesita nada, o el producto no tiene ventas, las cajas se reparten en partes iguales. Si el código no se encuentra en ningún bodegón, la fila queda sin cambios.</p>
+    <div class="warning"><span class="ico">⚠️</span><div>El botón pasa a llamarse <strong>Recalcular</strong> después de usarlo. Al recalcular se <strong>sobrescriben</strong> las cajas que hayas escrito a mano en las filas con código. Ajusta las cajas a mano solo después de calcular.</div></div>
+    <p>Puedes corregir cualquier cantidad: <strong>Rec/C</strong> (cajas recibidas, que por defecto es igual a Fac/C), el <strong>U/C</strong> y las cajas de cada bodegón.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🧱</span> Bloques de la tabla</h3>
+    <p>La tabla se divide en bloques con líneas gruesas de color, para no confundir los bodegones:</p>
+    <table class="data-table">
+      <thead><tr><th>Bloque</th><th>Columnas</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Factura Mayorista 23</strong></td><td>#, CodInicial, Nuevo, Cód. TKC, Creado, Nombre producto, U/C, Fac/C (cajas facturadas), Rec/C (cajas recibidas), Precio/C, Importe, P/u (precio por unidad) y Total U (unidades recibidas).</td></tr>
+        <tr><td><strong>Ajuste AA</strong> (rosa)</td><td><strong>Script AA</strong>: script que da entrada al 1053 a todo lo recibido.</td></tr>
+        <tr><td><strong>1053</strong> (ámbar)</td><td><strong>1053/C</strong> cajas que se quedan en el 1053 y <strong>1053/U</strong> sus unidades.</td></tr>
+        <tr><td><strong>→ 1201</strong> (violeta), <strong>→ 1882</strong> (cian), <strong>→ 1883</strong> (verde)</td><td>Cada uno con <strong>/C</strong> (cajas a transferir), <strong>/U</strong> (unidades = cajas × U/C) y su <strong>Script</strong> de transferencia.</td></tr>
+      </tbody>
+    </table>
+    <p>Pasa el cursor sobre los encabezados de los bloques para ver una descripción breve de cada columna.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📋</span> Scripts y pedidos</h3>
+    <p>Cada script tiene la forma <kbd>código*unidades</kbd>. Haz clic sobre uno para copiarlo. Para copiar todos de una vez usa los botones de la fila <strong>Enviar pedidos</strong>:</p>
+    <table class="data-table">
+      <thead><tr><th>Botón</th><th>Qué copia</th></tr></thead>
+      <tbody>
+        <tr><td><span class="btn-sample amber">Pedido AA 1053</span></td><td>Una línea por producto con código, con el total de unidades recibidas.</td></tr>
+        <tr><td><span class="btn-sample purple">Pedido Transf 1201 / 1882 / 1883</span></td><td>Las líneas de ese bodegón, solo de los productos con cajas asignadas.</td></tr>
+      </tbody>
+    </table>
+    <p>Solo entran en estos pedidos los productos que tienen código. El envío automático al sistema de inventario aún no está disponible: de momento el pedido se copia al portapapeles para pegarlo donde corresponda.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">💾</span> Guardar e Historial</h3>
+    <div class="warning"><span class="ico">⚠️</span><div><strong>Guardar todavía no está disponible.</strong> Si lo pulsas, el sistema avisa en rojo <em>"No se guardó nada"</em>, porque el servicio que almacena las facturas aún está en preparación. La factura y las cajas siguen en pantalla, pero se pierden al recargar la página. El <strong>Historial</strong> mostrará las facturas guardadas cuando ese servicio esté activo; mientras tanto aparece vacío.</div></div>
+    <p>Lo que sí se guarda de inmediato son las <strong>asociaciones nombre → código</strong>, así que el trabajo de asociar códigos no se pierde.</p>
+  </div>
+</div>
+
+<!-- CAP 11 OTRAS SECCIONES -->
+<div class="chapter" id="cap-otras">
+  <div class="chapter-header">
+    <div class="chapter-num">11</div>
+    <div class="chapter-title">Otras secciones del sistema</div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📦</span> Reab. Directo</h3>
+    <p>Muestra el inventario de uno o varios almacenes y calcula cuánto pedir según el ritmo de ventas, para llegar a un stock ideal. Pueden usarla Admin, Supervisor, Comercial, Analista IC y Revisor.</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Elige uno o más <strong>Almacenes</strong> (casillas; <em>Limpiar selección</em> los quita todos). Sin almacén no se muestra nada.</div></div>
+      <div class="step"><div class="step-body">Opcional: busca un <strong>Suministrador</strong> para ver solo sus productos, y abre <strong>Configurar</strong> para cambiar los índices que forman el I.AVG.</div></div>
+      <div class="step"><div class="step-body">Elige <strong>S.Mín</strong> (7, 15, 20, 30, 45 o 60 días; por defecto 30) y <strong>S.Ideal</strong> (30, 45, 60, 90, 120 o 180 días; por defecto 90).</div></div>
+      <div class="step"><div class="step-body">Revisa la columna <strong>Sugerido</strong>. Puedes buscar por nombre, código o ID.</div></div>
+      <div class="step"><div class="step-body">Con el filtro <strong>Mostrar</strong>, junto al buscador, deja solo los productos <em>Urgentes</em> (cobertura menor que S.Mín), <em>En rango</em> (entre S.Mín y S.Ideal) o <em>Con sugerido &gt;0</em>. Cada opción muestra cuántos productos tiene, y <em>Todos</em> quita el filtro.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample green">Excel</span> para descargar las filas que ves.</div></div>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Columna</th><th>Qué significa</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Stock / Reserv.</strong></td><td>Existencia y salidas pendientes. El stock se pinta en rojo si es 0 o menos y en ámbar si es 5 o menos.</td></tr>
+        <tr><td><strong>Cob.(días)</strong></td><td>Stock ÷ I.AVG. En rojo si es menor que S.Mín y en ámbar si está entre S.Mín y S.Ideal.</td></tr>
+        <tr><td><strong>S.Mín / S.Ideal</strong></td><td>I.AVG × los días elegidos.</td></tr>
+        <tr><td><strong>Sugerido</strong></td><td>Lo que falta para llegar al S.Ideal: S.Ideal − Stock, redondeado hacia arriba y nunca negativo.</td></tr>
+        <tr><td><strong>Cat.V</strong></td><td>A = mayor rotación, B = media, C = baja.</td></tr>
+      </tbody>
+    </table>
+    <p>Si un producto no tiene índice de ventas, S.Mín, S.Ideal, Sugerido y Cobertura aparecen como "—". Una fila completa se tiñe de rojo cuando el producto tiene <strong>Sugerido mayor que cero</strong> y a la vez una <strong>cobertura menor que los días de S.Mín</strong>; las filas sin color son las que no cumplen alguna de las dos cosas (por ejemplo, las que no tienen índice de ventas y por eso no tienen cobertura). La tabla se divide en cuatro bloques con líneas de color: <em>Producto</em>, <em>Stock y ventas</em> (de Stock a Cat.V), <em>Niveles de stock</em> (S.Mín y S.Ideal) y <em>Pedido</em> (Sugerido).</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">⚙️</span> Variables de Precios</h3>
+    <p>Permite a Admin y Supervisor editar los parámetros base del cálculo del <strong>Precio Propuesto TKC</strong>. Los valores son globales: valen para todos los proveedores.</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Busca la variable en la tabla (columnas Etiqueta, Clave, Valor Global, Actualizado) y pulsa <span class="btn-sample outline">Editar</span>.</div></div>
+      <div class="step"><div class="step-body">Escribe el nuevo valor. Los porcentajes se escriben como número (5 significa 5%, 16 significa 16%); los demás en USD o CUP según indique la ayuda del campo.</div></div>
+      <div class="step"><div class="step-body">Si algunos proveedores tienen un valor personalizado, el diálogo lo indica. Marca <strong>Aplicar también a estos proveedores</strong> solo si quieres que adopten el nuevo valor global.</div></div>
+      <div class="step"><div class="step-body">Pulsa <span class="btn-sample">Guardar cambio</span>.</div></div>
+    </div>
+    <div class="warning"><span class="ico">⚠️</span><div>Marcar <em>Aplicar también a estos proveedores</em> <strong>elimina las excepciones</strong> de esa variable en todos los proveedores. Los proveedores sin excepción siempre usan el valor global.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">👥</span> Usuarios (solo Admin)</h3>
+    <p>Pantalla de <strong>solo consulta</strong> para el Admin. Muestra tu sesión (nombre, correo y rol) y la lista de roles del sistema con lo que puede hacer cada uno. Cualquier otro rol que llegue a esta pantalla ve el aviso <em>"Esta sección es solo para administradores."</em></p>
+    <div class="note"><span class="ico">ℹ️</span><div><strong>Los usuarios no se gestionan aquí.</strong> Crear usuarios, cambiar su rol, asignar permisos o dar de baja a alguien se hace en <strong>Identity</strong>, la plataforma central de usuarios de todos los sistemas de la empresa. Un cambio de rol hecho allí llega a las sesiones abiertas en menos de 30 segundos.</div></div>
+    <p>Los roles del sistema son: Admin, Supervisor, Comercial, Analista IC, Revisor, Inventario y Consulta. Una persona que no tenga ningún rol asignado para Reabastecimiento entra como <strong>Consulta</strong>.</p>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">📏</span> U/C Pendientes</h3>
+    <p>Permite asignar las <strong>unidades por caja (U/C)</strong> a los productos de cualquier almacén. Los productos internos no traen ese dato, por eso esta pantalla lista los productos del almacén elegido y deja escribirlo.</p>
+    <div class="steps">
+      <div class="step"><div class="step-body">Elige el <strong>Almacén</strong>. Se cargan sus productos con <strong>Cód. TKC</strong> y <strong>Nombre</strong> (en los almacenes muy grandes puede tardar hasta medio minuto).</div></div>
+      <div class="step"><div class="step-body">Busca por código o nombre, o usa <strong>Mostrar</strong> (<em>Todos</em>, <em>Sin U/C</em>, <em>Con U/C</em>) para ver solo los que faltan. Arriba a la derecha ves cuántos productos hay, cuántos tienen U/C y cuántos no.</div></div>
+      <div class="step"><div class="step-body">Escribe las unidades por caja en la columna <strong>U/C</strong> (número entero mayor que cero) y pulsa <span class="btn-sample outline">Guardar</span> o <kbd>Enter</kbd>.</div></div>
+      <div class="step"><div class="step-body">La fila muestra "✓ Guardado". Puedes corregir el valor cuando quieras: al cambiarlo vuelve a aparecer el botón Guardar. Usa <strong>Anterior</strong> y <strong>Siguiente</strong> para recorrer las páginas (50 productos por página).</div></div>
+    </div>
+    <div class="note"><span class="ico">ℹ️</span><div>La U/C es del <strong>producto</strong>, no del almacén: si lo guardas en un almacén, el mismo código aparece con ese valor en los demás.</div></div>
+    <div class="warning"><span class="ico">⚠️</span><div><strong>Guardado provisional.</strong> Por ahora los U/C se guardan solo en el navegador que usas: no se envían al servidor, no los ven otros usuarios y se pierden si borras los datos del navegador. Además, la columna <strong>U/C</strong> de Propuesta Bodegones todavía no los lee.</div></div>
+  </div>
+
+  <div class="section">
+    <h3><span class="ico">🚧</span> Pantalla en desarrollo</h3>
+    <p>La pantalla <strong>Propuesta FF</strong> ya aparece en el menú, pero todavía trabaja con datos de ejemplo y <strong>no lee información real</strong>. No la uses para trabajo operativo. Su propósito previsto es la propuesta de reabastecimiento de los almacenes FF, con filtros por estado y clasificación.</p>
+  </div>
+</div>
+
+<!-- CAP 12 (antes 9 y 10) -->
+<div class="chapter" id="cap9">
+  <div class="chapter-header">
+    <div class="chapter-num">12</div>
+    <div class="chapter-title">Glosario</div>
+  </div>
+
+  <!-- Índices de venta -->
+  <div class="section">
+    <h3><span class="ico">📊</span> Índices de ventas — guía para comerciales</h3>
+    <p>Todos los índices expresan <strong>unidades vendidas por día</strong>. Para calcular cuánto pedir se usa la fórmula: <em>Índice × días de cobertura deseados − stock actual</em>. El sistema aplica esta fórmula automáticamente usando <strong>I.AVG</strong>.</p>
+    <table style="width:100%; border-collapse:collapse; font-size:12.5px; margin-top:10px;">
+      <thead>
+        <tr style="background:var(--navy); color:#fff;">
+          <th style="padding:8px 10px; text-align:left; width:60px;">Código</th>
+          <th style="padding:8px 10px; text-align:left; width:180px;">Nombre completo</th>
+          <th style="padding:8px 10px; text-align:left;">Qué mide y cuándo usarlo</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#f8fafc;">
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.&gt;0</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario &gt; 0</td>
+          <td style="padding:8px 10px; color:var(--soft);">Promedio contando solo los días con alguna venta. Es el <strong>índice principal</strong> para reabastecimiento: refleja el ritmo real de salida cuando el producto está disponible.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.≥½</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario ≥ max/2</td>
+          <td style="padding:8px 10px; color:var(--soft);">Solo cuenta los días con venta alta (≥ mitad del máximo). Elimina días atípicamente bajos. Más conservador que P.&gt;0; útil para productos con demanda irregular.</td>
+        </tr>
+        <tr style="background:#f8fafc;">
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.Tod</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Todos</td>
+          <td style="padding:8px 10px; color:var(--soft);">Incluye todos los días, incluso los que no hubo venta. Siempre será menor que P.&gt;0. Útil para planificación de largo plazo.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.NoF</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario No Festivas</td>
+          <td style="padding:8px 10px; color:var(--soft);">Solo días laborables normales (sin festivos). Para productos cuya demanda cae en días no laborables.</td>
+        </tr>
+        <tr style="background:#f8fafc;">
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.Fest</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Festivas</td>
+          <td style="padding:8px 10px; color:var(--soft);">Solo días festivos y fines de semana. Para productos con más salida cuando hay mayor flujo de público (bebidas, snacks, juguetes).</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.NDic</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Nov+Dic</td>
+          <td style="padding:8px 10px; color:var(--soft);">Promedio de noviembre y diciembre (temporada alta). Usar para planificar el stock navideño con anticipación.</td>
+        </tr>
+        <tr style="background:#f8fafc;">
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.Feb</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario 14 Feb</td>
+          <td style="padding:8px 10px; color:var(--soft);">Primera quincena de febrero. Para reabastecer productos de regalo, chocolates, flores, etc., antes del Día de San Valentín.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.Mad</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Madres</td>
+          <td style="padding:8px 10px; color:var(--soft);">Período del Día de las Madres. Para preparar stock de regalo y decoración antes de ese evento.</td>
+        </tr>
+        <tr style="background:#f8fafc;">
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.1m</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Últ. 1 mes</td>
+          <td style="padding:8px 10px; color:var(--soft);">Últimos 30 días. Refleja la tendencia más reciente: si el producto está en alza o en caída.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.3m</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Últ. 3 meses</td>
+          <td style="padding:8px 10px; color:var(--soft);">Últimos 90 días. Balance entre tendencia reciente y estabilidad.</td>
+        </tr>
+        <tr style="background:#f8fafc;">
+          <td style="padding:8px 10px; font-weight:700; color:var(--accent); font-family:var(--mono);">P.6m</td>
+          <td style="padding:8px 10px; font-weight:600;">Prom. Diario Últ. 6 meses</td>
+          <td style="padding:8px 10px; color:var(--soft);">Últimos 180 días. Para productos con demanda estable; suaviza fluctuaciones de corto plazo.</td>
+        </tr>
+        <tr style="background:#e8f5e9;">
+          <td style="padding:8px 10px; font-weight:700; color:#2e7d32; font-family:var(--mono);">★ I.AVG</td>
+          <td style="padding:8px 10px; font-weight:700; color:#2e7d32;">Índice Compuesto</td>
+          <td style="padding:8px 10px; color:#388e3c;"><strong>El índice recomendado.</strong> Es el <strong>promedio simple</strong> de los índices que tengas seleccionados (por defecto P.≥½, P.&gt;0 y P.1m) y se calcula automáticamente. Se usa para las propuestas de reabastecimiento. En la pantalla Distribución usa una combinación fija propia: (Prom. Últ. 6 meses + P.&gt;0 + P.&gt;0) ÷ 3.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="glossary-item">
+      <div class="glossary-term">Oferta base</div>
+      <div class="glossary-def">Lista maestra de productos y precios de un proveedor. Se va actualizando con cada importación sin perder ítems anteriores.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Asociación / Emparejamiento (Matching)</div>
+      <div class="glossary-def">Vinculación entre un producto de la lista del proveedor y su equivalente en el catálogo interno de la tienda. Sin esta vinculación no es posible generar propuestas de reabastecimiento.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Flujo de aprobación</div>
+      <div class="glossary-def">El proceso interno por el que pasa un pedido antes de ser enviado al proveedor: Comercial crea → Analista IC revisa → Revisor aprueba → Comercial descarga.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Analista IC</div>
+      <div class="glossary-def">Rol del equipo de Inteligencia Comercial. Revisa y ajusta las cantidades de los pedidos antes de que lleguen al Revisor para aprobación final.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Revisor</div>
+      <div class="glossary-def">Rol con autoridad para dar aprobación final a los pedidos de compra. Puede ajustar cantidades y al aprobar notifica automáticamente al Comercial.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Historial de precios</div>
+      <div class="glossary-def">Registro automático de cada cambio de precio detectado en las importaciones. Se accede desde el ícono de reloj 🕐 por ítem en la pestaña Ítems de una oferta.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Índice de ventas diarias</div>
+      <div class="glossary-def">Promedio de unidades vendidas por día de un producto. Es la base para calcular cuánto stock se necesita en la propuesta de reabastecimiento.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Múltiplo de caja</div>
+      <div class="glossary-def">Cantidad mínima de unidades en que el proveedor vende el producto. Las cantidades pedidas deben ser múltiplos de este número.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Confirmación del proveedor</div>
+      <div class="glossary-def">Respuesta del proveedor indicando qué cantidades puede realmente entregar. Solo disponible tras la aprobación interna del pedido.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">PDF de Pedido Confirmado</div>
+      <div class="glossary-def">Documento final generado tras revisar la confirmación del proveedor. Incluye solo los ítems aceptados con las cantidades confirmadas y el total recalculado.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Producto Nuevo</div>
+      <div class="glossary-def">Ítem de la lista del proveedor que no tiene equivalente en el catálogo interno de la tienda. El Comercial lo marca explícitamente en la pestaña Asociación para incluirlo en el pedido con cantidad manual. En el PDF para el proveedor aparece igual que cualquier otro ítem — la distinción es solo interna.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Multi-asociación (Pack)</div>
+      <div class="glossary-def">Cuando el proveedor vende un pack que contiene varios SKUs del catálogo interno, un mismo ítem de oferta puede tener múltiples asociaciones. En el PDF del pedido, las cantidades de todas las asociaciones se suman y se muestran como una sola línea del ítem del proveedor.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Vista Proveedor</div>
+      <div class="glossary-def">Vista alternativa del detalle de un pedido que muestra los ítems agrupados por ítem de oferta (tal como los vería el proveedor), con cantidades sumadas. Se activa con el botón "📦 Vista proveedor" en la cabecera de la sección de ítems.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Bodegón</div>
+      <div class="glossary-def">Almacén de venta que se abastece de otros almacenes. El sistema maneja cuatro: el 1053 (principal) y el 1201, 1882 y 1883.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Origen</div>
+      <div class="glossary-def">Almacén grande del que se repone un producto del bodegón 1053 (por ejemplo 593 o 789). Puede decir también "SM23 M." (compra directa al proveedor Mayorista 23) o "Sin origen".</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Condición de filtro</div>
+      <div class="glossary-def">Regla numérica que arma el usuario en Propuesta Bodegones (por ejemplo, Cobertura &lt; 20). Varias condiciones se aplican a la vez y se pueden guardar en una vista.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Cobertura (días)</div>
+      <div class="glossary-def">Cuántos días durará el stock actual al ritmo de venta del producto: stock ÷ I.AVG.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Propuesta Ideal</div>
+      <div class="glossary-def">Unidades que faltan para cubrir los días del umbral de cobertura elegido (5, 10 o 15): I.AVG × días − stock, sin valores negativos.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">U/C (unidades por caja)</div>
+      <div class="glossary-def">Cuántas unidades trae cada caja. En Distribución se toma del nombre del producto en la factura, por ejemplo "(24 x 395 g)" significa 24, y se puede corregir a mano.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Ajuste AA</div>
+      <div class="glossary-def">Operación que da entrada al bodegón 1053 a todo lo recibido de una factura. Después se hacen las transferencias a los otros bodegones.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Script (código*unidades)</div>
+      <div class="glossary-def">Línea de texto con el código del producto y las unidades, separados por un asterisco, que se pega en el sistema de inventario para registrar un ajuste o una transferencia.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Asociación nombre → código</div>
+      <div class="glossary-def">Regla que guarda el sistema: "el nombre X de la factura corresponde al código TKC Y". Se aplica automáticamente en las facturas siguientes, para todos los usuarios. El nombre se compara exacto, tal como viene en la factura.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">CodInicial</div>
+      <div class="glossary-def">Últimos 6 dígitos del código TKC de un producto nuevo, que le pasan al cliente antes de que exista el producto completo en su sistema. El sistema lo usa para encontrar el código completo.</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Nuevo / Creado (Distribución)</div>
+      <div class="glossary-def">Dos marcas de cada fila de la pantalla Distribución. "Nuevo" indica que el producto hay que darle de alta; "Creado" que ya se le dio entrada. Las filas Nuevas que aún no están Creadas se ven con el filtro "Pendientes".</div>
+    </div>
+    <div class="glossary-item">
+      <div class="glossary-term">Agenda</div>
+      <div class="glossary-def">Calendario del módulo de Reabastecimiento que muestra contactos programados con proveedores (azul), contactos realizados (verde) y pagos pendientes de pedidos (morado). Se alimenta automáticamente al registrar contactos desde la sección Proveedores.</div>
+    </div>
+  </div>
+
+  <hr>
+  <p style="font-size:12px; color:var(--muted); text-align:center; padding-top:8px;">
+    Reabastecimiento v2.4 &nbsp;·&nbsp; Manual de Usuario &nbsp;·&nbsp; Mercado Elíneas &nbsp;·&nbsp; Octubre 2026<br>
+    Para soporte técnico contactar al administrador del sistema.
+  </p>
+</div>
+
+</div>
+</body>
+</html>
