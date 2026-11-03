@@ -1,53 +1,89 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { isSupabaseConfigured, supabase, supabaseConfigError } from '@/api/supabaseClient';
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import { tokenStore } from '@/api/tokenStore';
+import { apiAuthLogin, apiAuthClearTokens } from '@/api/apiAuthClient';
+import { base44 } from '@/api/supabaseClient';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser]                   = useState(null);
+  const [user,            setUser]            = useState(null);
+  const [userProfile,     setUserProfile]     = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [isLoadingAuth,   setIsLoadingAuth]   = useState(true);
 
-  useEffect(() => {
-    if (!isSupabaseConfigured) {
+  const loadSession = useCallback(async () => {
+    const token = tokenStore.get();
+    if (!token) {
+      setUser(null);
+      setUserProfile(null);
+      setIsAuthenticated(false);
       setIsLoadingAuth(false);
-      return () => {};
+      return;
     }
-
-    // Sesión inicial
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setIsAuthenticated(!!session?.user);
+    try {
+      const profile = await base44.auth.me();
+      setUser({ id: profile.id, email: profile.email });
+      setUserProfile(profile);
+      setIsAuthenticated(true);
+    } catch {
+      apiAuthClearTokens();
+      setUser(null);
+      setUserProfile(null);
+      setIsAuthenticated(false);
+    } finally {
       setIsLoadingAuth(false);
-    });
-
-    // Escuchar cambios de sesión (login / logout / refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setIsAuthenticated(!!session?.user);
-    });
-
-    return () => subscription.unsubscribe();
+    }
   }, []);
 
-  const logout = () => supabase.auth.signOut();
+  useEffect(() => { loadSession(); }, [loadSession]);
 
-  // Mantiene la firma original para no romper componentes que llamen navigateToLogin
-  const navigateToLogin = () => {};
+  const login = useCallback(async (email, password) => {
+    const json = await apiAuthLogin(email, password);
+    // Use user data from sign-in response if available (avoids extra /auth/me request)
+    const userData = json?.user ?? json?.data?.user ?? json?.data;
+    if (userData?.email || userData?.id) {
+      const profile = {
+        id:        userData.id        ?? userData.userId    ?? null,
+        email:     userData.email                           ?? null,
+        role:      userData.role      ?? userData.systemRole ?? 'consulta',
+        full_name: userData.fullName  ?? userData.full_name ?? userData.name ?? null,
+        status:    'active',
+      };
+      setUser({ id: profile.id, email: profile.email });
+      setUserProfile(profile);
+      setIsAuthenticated(true);
+      setIsLoadingAuth(false);
+    } else {
+      // Sign-in response didn't include user info → fetch from /auth/me
+      await loadSession();
+    }
+  }, [loadSession]);
+
+  const logout = useCallback(() => {
+    apiAuthClearTokens();
+    setUser(null);
+    setUserProfile(null);
+    setIsAuthenticated(false);
+  }, []);
+
+  const refreshProfile = useCallback(() => loadSession(), [loadSession]);
 
   return (
     <AuthContext.Provider value={{
       user,
+      userProfile,
       isAuthenticated,
       isLoadingAuth,
       isLoadingPublicSettings: false,
-      authError: !isSupabaseConfigured
-        ? { type: 'configuration_required', message: supabaseConfigError }
-        : (!isAuthenticated && !isLoadingAuth) ? { type: 'auth_required' } : null,
+      authError: (!isAuthenticated && !isLoadingAuth)
+        ? { type: 'auth_required' }
+        : null,
       appPublicSettings: null,
+      login,
       logout,
-      navigateToLogin,
-      checkAppState: () => {},
+      refreshProfile,
+      navigateToLogin: () => {},
+      checkAppState:   () => {},
     }}>
       {children}
     </AuthContext.Provider>

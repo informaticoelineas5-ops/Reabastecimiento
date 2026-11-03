@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import { createReabEntityAdapter, REAB_ENTITIES } from './reabApiClient';
+import { tokenStore } from './tokenStore';
+import { apiAuthClearTokens } from './apiAuthClient';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim();
+const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL?.trim();
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
 export const missingSupabaseEnvVars = [
@@ -54,22 +57,9 @@ export const supabase = isSupabaseConfigured
   : createDisabledSupabaseClient();
 
 // ── Entity name → Supabase table name ─────────────────────
-const TABLE_MAP = {
-  Offer:                       'offers',
-  Product:                     'products',
-  Supplier:                    'suppliers',
-  PurchaseOrder:               'purchase_orders',
-  PurchaseOrderItem:           'purchase_order_items',
-  SupplierOffer:               'supplier_offers',
-  SupplierOfferItem:           'supplier_offer_items',
-  SupplierOfferItemMatch:      'supplier_offer_item_matches',
-  OfferItemMatch:              'offer_item_matches',
-  SalesIndex:                  'sales_index',
-  InventorySnapshot:           'inventory_snapshots',
-  Connector:                   'connectors',
-  ImportLog:                   'import_logs',
-  ReplenishmentProposalItem:   'replenishment_proposal_items',
-};
+// All entities now route through REAB_ENTITIES → createReabEntityAdapter.
+// This map is kept as a fallback for any entity not yet in REAB_ENTITIES.
+const TABLE_MAP = {};
 
 // ── Map base44 orderBy format to Supabase ─────────────────
 // "-created_date" → { column: "created_at", ascending: false }
@@ -241,21 +231,67 @@ function createEntityAdapter(entityName) {
   };
 }
 
+// Fetches the role assigned to this user in the 'reabastecimiento' system from IS.
+// Response shape: { "roles": [{ "name": "admin", "system": { "slug": "reabastecimiento" } }, ...] }
+async function fetchUserRoles(token) {
+  try {
+    const res = await fetch('https://apiauth.mercadoelineas.com/api/user-roles/me', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const roles = json.roles ?? json.data?.roles ?? [];
+    // Un usuario puede tener varios roles en el sistema (p. ej. cardista y analista)
+    return roles.filter(r => r.system?.slug === 'reabastecimiento').map(r => r.name).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 // ── Auth adapter (mirrors base44.auth API) ─────────────────
 const authAdapter = {
   async me() {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) throw error ?? new Error('Not authenticated');
+    const token = tokenStore.get();
+    if (!token) throw new Error('Not authenticated');
+
+    // Identity comes from JWT claims (no /auth/me endpoint exists on IS)
+    let claims = null;
+    try {
+      const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      claims = JSON.parse(atob(b64));
+    } catch {}
+
+    if (claims?.exp && claims.exp * 1000 < Date.now()) {
+      apiAuthClearTokens();
+      throw new Error('Session expired');
+    }
+
+    if (!claims?.sub && !claims?.email) {
+      throw new Error('Invalid token');
+    }
+
+    // Role comes from IS user-roles endpoint (filtered to reabastecimiento system)
+    const roles = await fetchUserRoles(token);
+    const role = roles[0] ?? null;
+
     return {
-      id: user.id,
-      email: user.email,
-      role: user.app_metadata?.role ?? null,
-      full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
+      id:        claims.sub       ?? null,
+      email:     claims.email     ?? null,
+      role:      role             ?? 'consulta',
+      roles:     roles.length ? roles : ['consulta'],
+      full_name: claims.name      ?? claims.fullName ?? null,
+      status:    'active',
     };
   },
 
+  // Los usuarios, roles y permisos se gestionan en Identity (elineas-auth); esta app solo los lee.
+  // Delegates to me() — identity now comes from IS
+  async getMyProfile(_userId, _email) {
+    return this.me();
+  },
+
   async logout(redirectUrl) {
-    await supabase.auth.signOut();
+    apiAuthClearTokens();
     if (redirectUrl) window.location.href = redirectUrl;
   },
 
@@ -269,6 +305,11 @@ export const base44 = {
   auth: authAdapter,
   entities: new Proxy(
     {},
-    { get: (_, entityName) => createEntityAdapter(entityName) }
+    {
+      get: (_, entityName) => {
+        if (REAB_ENTITIES.has(entityName)) return createReabEntityAdapter(entityName);
+        return createEntityAdapter(entityName);
+      },
+    }
   ),
 };
