@@ -59,6 +59,16 @@
     },
     "rejection_reason": {
       "type": "string"
+    },
+    "fecha_limite_pago": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha límite para pagar el pedido"
+    },
+    "fecha_estimada_llegada": {
+      "type": "string",
+      "format": "date",
+      "description": "ETA estimada de llegada del pedido/contenedor"
     }
   },
   "required": [
