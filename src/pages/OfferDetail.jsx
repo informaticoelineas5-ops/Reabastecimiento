@@ -65,9 +65,11 @@ const STATUS_HINT_MAP = {
   inactive: { label: "Inactivo",    cls: "bg-muted text-muted-foreground" },
 };
 
-export default function OfferDetail() {
-  const params    = new URLSearchParams(window.location.search);
-  const productId = params.get("id");
+export default function OfferDetail({ productId: propProductId, onClose }) {
+  const hashSearch = window.location.hash.includes("?")
+    ? window.location.hash.split("?")[1]
+    : "";
+  const productId = propProductId ?? new URLSearchParams(hashSearch).get("id");
 
   // Si el id parece un UUID (viene del Catálogo) → busca por products.id
   // Si parece un id numérico/externo (viene de Alertas via offer_external_id) → busca por products.id_online
@@ -120,9 +122,13 @@ export default function OfferDetail() {
     return (
       <div className="p-6 text-center">
         <p className="text-muted-foreground">Producto no encontrado</p>
-        <Link to={createPageUrl("Catalog")}>
-          <Button variant="outline" className="mt-4">Volver al catálogo</Button>
-        </Link>
+        {onClose ? (
+          <Button variant="outline" className="mt-4" onClick={onClose}>Volver al catálogo</Button>
+        ) : (
+          <Link to={createPageUrl("Catalog")}>
+            <Button variant="outline" className="mt-4">Volver al catálogo</Button>
+          </Link>
+        )}
       </div>
     );
   }
@@ -168,11 +174,17 @@ export default function OfferDetail() {
 
       {/* ── Header ── */}
       <div className="flex items-center gap-3">
-        <Link to={createPageUrl("Catalog")}>
-          <Button variant="ghost" size="icon" className="h-8 w-8">
+        {onClose ? (
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
             <ArrowLeft size={16} />
           </Button>
-        </Link>
+        ) : (
+          <Link to={createPageUrl("Catalog")}>
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <ArrowLeft size={16} />
+            </Button>
+          </Link>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-lg font-bold truncate">{p.nombre}</h1>

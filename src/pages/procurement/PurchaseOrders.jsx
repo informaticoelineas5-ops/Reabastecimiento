@@ -4,10 +4,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ClipboardList, Search, ExternalLink, Truck, Package, DollarSign, Trash2 } from "lucide-react";
+import { FilterBar, FilterField, FilterSearch } from "@/components/common/FilterBar";
+import { ListFilter } from "lucide-react";
+import { ClipboardList, ExternalLink, Truck, Package, DollarSign, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -15,13 +16,21 @@ import { useProcurementUser } from "@/hooks/useProcurementUser";
 import { useToast } from "@/components/ui/use-toast";
 
 const STATUS_CONFIG = {
-  borrador:              { label: "Borrador",           className: "bg-gray-100 text-gray-600 border-gray-200",          borderL: "border-l-gray-300" },
-  pendiente_revision:    { label: "Pendiente Revisión", className: "bg-amber-100 text-amber-700 border-amber-200",       borderL: "border-l-amber-400" },
-  confirmado:            { label: "Confirmado",         className: "bg-emerald-100 text-emerald-700 border-emerald-200", borderL: "border-l-emerald-500" },
-  enviado:               { label: "Enviado",            className: "bg-blue-100 text-blue-700 border-blue-200",          borderL: "border-l-blue-500" },
-  parcialmente_recibido: { label: "Recibido parcial",   className: "bg-teal-100 text-teal-700 border-teal-200",          borderL: "border-l-teal-400" },
-  recibido:              { label: "Recibido",           className: "bg-green-100 text-green-800 border-green-200",       borderL: "border-l-green-600" },
-  cancelado:             { label: "Cancelado",          className: "bg-red-100 text-red-700 border-red-200",             borderL: "border-l-red-400" },
+  borrador:              { label: "Borrador",           className: "bg-gray-100 text-gray-600 border-gray-200",            borderL: "border-l-gray-300" },
+  pendiente_revision:    { label: "Pendiente Revisión", className: "bg-amber-100 text-amber-700 border-amber-200",         borderL: "border-l-amber-400" },
+  confirmado:            { label: "Confirmado",         className: "bg-emerald-100 text-emerald-700 border-emerald-200",   borderL: "border-l-emerald-500" },
+  enviado:               { label: "Enviado",            className: "bg-blue-100 text-blue-700 border-blue-200",            borderL: "border-l-blue-500" },
+  en_transito:           { label: "En Tránsito",        className: "bg-sky-100 text-sky-700 border-sky-200",               borderL: "border-l-sky-500" },
+  pagado:                { label: "Pagado",             className: "bg-violet-100 text-violet-700 border-violet-200",      borderL: "border-l-violet-500" },
+  parcialmente_recibido: { label: "Recibido parcial",   className: "bg-teal-100 text-teal-700 border-teal-200",            borderL: "border-l-teal-400" },
+  recibido:              { label: "Recibido",           className: "bg-green-100 text-green-800 border-green-200",         borderL: "border-l-green-600" },
+  cancelado:             { label: "Cancelado",          className: "bg-red-100 text-red-700 border-red-200",               borderL: "border-l-red-400" },
+};
+
+const APPROVAL_CONFIG = {
+  pending_ic:     { label: "En revisión IC",    cls: "bg-purple-100 text-purple-700 border-purple-200" },
+  pending_review: { label: "Pend. Revisor",     cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  approved:       { label: "Aprobado",          cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
 };
 
 export default function PurchaseOrders() {
@@ -50,6 +59,10 @@ export default function PurchaseOrders() {
         await Promise.all(items.map(it => base44.entities.PurchaseOrderItem.delete(it.id)));
       }
       await base44.entities.PurchaseOrder.delete(order.id);
+      if (order.offer_id) {
+        await base44.entities.SupplierOffer.update(order.offer_id, { status: "fully_matched" });
+        queryClient.invalidateQueries({ queryKey: ["supplier-offers"] });
+      }
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
       toast({ title: "Pedido eliminado", description: `Pedido #${order.id.slice(-6).toUpperCase()} eliminado correctamente.` });
     } catch (err) {
@@ -80,7 +93,7 @@ export default function PurchaseOrders() {
   if (loadingUser || isLoading) return <div className="p-6 space-y-3">{Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>;
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-[1200px] mx-auto">
+    <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -91,25 +104,39 @@ export default function PurchaseOrders() {
             <p className="text-xs text-muted-foreground">{filtered.length} pedido(s){isAdmin ? " — vista global" : ""}</p>
           </div>
         </div>
-        <div className="bg-success/10 rounded-lg px-4 py-2 text-right">
-          <p className="text-sm font-bold text-success">Total activo</p>
-          <p className="text-lg font-bold">{totalAmount.toFixed(2)}</p>
-        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={14} className="absolute left-2.5 top-2.5 text-muted-foreground" />
-          <Input placeholder="Buscar proveedor u oferta..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-9" />
+      {/* Mini stats */}
+      {orders.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: "Total",          value: orders.length,                                                             cls: "text-foreground" },
+            { label: "Pend. revisión", value: orders.filter(o => o.status === "pendiente_revision").length,              cls: "text-warning" },
+            { label: "Confirmados",    value: orders.filter(o => o.status === "confirmado").length,                      cls: "text-success" },
+            { label: "Enviados",       value: orders.filter(o => o.status === "enviado").length,                         cls: "text-info" },
+            { label: "Recibidos",      value: orders.filter(o => o.status === "recibido" || o.status === "parcialmente_recibido").length, cls: "text-primary" },
+            { label: "Monto total",    value: `${totalAmount.toFixed(0)}`, cls: "text-success" },
+          ].map(({ label, value, cls }) => (
+            <div key={label} className="flex items-center gap-1.5 bg-muted/60 border border-border/50 rounded-lg px-3 py-1.5 text-xs">
+              <span className={`font-bold text-sm ${cls}`}>{value}</span>
+              <span className="text-muted-foreground">{label}</span>
+            </div>
+          ))}
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[160px] h-9 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los estados</SelectItem>
-            {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      )}
+
+      <FilterBar>
+        <FilterSearch value={search} onChange={setSearch} placeholder="Proveedor u oferta…" className="w-[240px]" />
+        <FilterField icon={ListFilter} label="Estado del pedido">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+      </FilterBar>
 
       <div className="space-y-2">
         {filtered.length === 0 ? (
@@ -139,9 +166,14 @@ export default function PurchaseOrders() {
             <Card key={order.id} className={`p-4 hover:shadow-md transition-shadow border-l-4 ${status.borderL}`}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm">Pedido #{order.id.slice(-6).toUpperCase()}</span>
                     <Badge className={`text-[10px] border ${status.className}`}>{status.label}</Badge>
+                    {APPROVAL_CONFIG[order.approval_status] && (
+                      <Badge className={`text-[10px] border ${APPROVAL_CONFIG[order.approval_status].cls}`}>
+                        {APPROVAL_CONFIG[order.approval_status].label}
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><Truck size={11} /> {order.supplier_name}</span>

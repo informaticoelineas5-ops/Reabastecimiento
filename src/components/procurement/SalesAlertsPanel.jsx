@@ -2,8 +2,10 @@ import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, TrendingUp, ShoppingCart, Info } from "lucide-react";
+import { AlertTriangle, TrendingUp, ShoppingCart, Info, Warehouse } from "lucide-react";
 import { Link } from "react-router-dom";
+import { getUserPreferences } from "@/api/userPreferencesClient";
+import { fetchProductsForAlmacen } from "@/api/externalSupabaseClient";
 
 // ABC classification within each category (no cross-category comparison)
 function classifyABC(products) {
@@ -26,7 +28,7 @@ function classifyABC(products) {
   return result;
 }
 
-export default function SalesAlertsPanel() {
+export default function SalesAlertsPanel({ limit = 30 }) {
   const { data: salesRaw = [] } = useQuery({
     queryKey: ["sales-index"],
     queryFn: () => base44.entities.SalesIndex.list("-periodo_fecha", 5000),
@@ -37,11 +39,36 @@ export default function SalesAlertsPanel() {
     queryFn: () => base44.entities.Offer.list("-updated_date", 2000),
   });
 
-  // Aggregate SalesIndex across all periods per product
+  // Almacenes configurados por el comercial (misma fuente que Alerts.jsx / Dashboard.jsx)
+  const { data: userPrefs } = useQuery({
+    queryKey: ["user-preferences"],
+    queryFn:  getUserPreferences,
+    staleTime: 5 * 60 * 1000,
+  });
+  const userAlmacenes = userPrefs?.almacenes?.length
+    ? userPrefs.almacenes
+    : (userPrefs?.almacen ? [userPrefs.almacen] : []);
+
+  const { data: almacenProductsMap = new Map(), isLoading: loadingAlmacenProducts } = useQuery({
+    queryKey: ["products-for-almacen-sales-alerts", userAlmacenes],
+    queryFn: async () => {
+      if (!userAlmacenes.length) return new Map();
+      const maps = await Promise.all(userAlmacenes.map(a => fetchProductsForAlmacen(a)));
+      const merged = new Map();
+      maps.forEach(m => m.forEach((v, k) => merged.set(k, v)));
+      return merged;
+    },
+    staleTime: 10 * 60 * 1000,
+    enabled: userAlmacenes.length > 0,
+  });
+
+  // Aggregate SalesIndex across all periods per product, filtrado por almacén del comercial
   const aggregated = useMemo(() => {
+    const scoped = userAlmacenes.length > 0 && almacenProductsMap.size > 0;
     const map = {};
     for (const s of salesRaw) {
       const id = s.tienda_internal_id;
+      if (scoped && !almacenProductsMap.has(String(id))) continue;
       if (!map[id]) {
         map[id] = {
           tienda_internal_id: id,
@@ -63,7 +90,7 @@ export default function SalesAlertsPanel() {
       num_periods: p.periods.size,
       avg_monthly: p.periods.size > 0 ? p.total_cantidad / p.periods.size : 0,
     }));
-  }, [salesRaw]);
+  }, [salesRaw, userAlmacenes, almacenProductsMap]);
 
   // Cross with Offer (current stock) by tienda_internal_id
   const alerts = useMemo(() => {
@@ -122,6 +149,14 @@ export default function SalesAlertsPanel() {
     });
   }, [aggregated, offers]);
 
+  if (userAlmacenes.length > 0 && loadingAlmacenProducts) {
+    return (
+      <div className="bg-muted/40 border border-border rounded-xl p-4 text-center text-xs text-muted-foreground">
+        Cargando productos de tus almacenes...
+      </div>
+    );
+  }
+
   if (salesRaw.length === 0) {
     return (
       <div className="bg-muted/40 border border-border rounded-xl p-4 text-center text-xs text-muted-foreground">
@@ -148,12 +183,21 @@ export default function SalesAlertsPanel() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <AlertTriangle size={15} className="text-warning" />
-          Alertas Predictivas de Stock
-          <Badge variant="destructive" className="text-[10px]">{alerts.length} productos</Badge>
-        </h3>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <AlertTriangle size={15} className="text-warning" />
+            Alertas Predictivas de Stock
+            <Badge variant="destructive" className="text-[10px]">{alerts.length} productos</Badge>
+          </h3>
+          <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+            {userAlmacenes.length > 0 ? (
+              <><Warehouse size={10} />{userAlmacenes.length === 1 ? userAlmacenes[0] : `${userAlmacenes.length} almacenes`}</>
+            ) : (
+              <span className="text-warning">Todos los almacenes (configura en Índices de Ventas)</span>
+            )}
+          </p>
+        </div>
         <Link to="/SalesRanking" className="text-xs text-primary underline">Ver ranking completo</Link>
       </div>
 
@@ -173,7 +217,7 @@ export default function SalesAlertsPanel() {
             </tr>
           </thead>
           <tbody>
-            {alerts.slice(0, 30).map((a) => {
+            {alerts.slice(0, limit).map((a) => {
               const cfg = urgencyConfig[a.urgency];
               return (
                 <tr key={a.tienda_internal_id} className={`border-b border-border/50 last:border-0 ${cfg.bg}`}>
@@ -209,8 +253,8 @@ export default function SalesAlertsPanel() {
           </tbody>
         </table>
       </div>
-      {alerts.length > 30 && (
-        <p className="text-xs text-muted-foreground text-center">Mostrando 30 de {alerts.length} alertas. <Link to="/SalesRanking" className="underline text-primary">Ver todas</Link></p>
+      {alerts.length > limit && (
+        <p className="text-xs text-muted-foreground text-center">Mostrando {limit} de {alerts.length} alertas. <Link to="/SalesRanking" className="underline text-primary">Ver todas</Link></p>
       )}
     </div>
   );

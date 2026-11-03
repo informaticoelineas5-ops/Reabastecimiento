@@ -1,125 +1,68 @@
-import React, { useState, useRef } from "react";
-import * as XLSX from "xlsx";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { parsePdfToRows } from "@/utils/pdfParser";
+import { readSpreadsheetFile } from "@/utils/spreadsheet";
+import {
+  NONE, SYSTEM_FIELDS, normalizeStr, detectHeaderRow, detectMapping, detectCurrency, buildItems,
+} from "@/utils/offerParsing";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, AlertCircle, CheckCircle2, Layers, ArrowRight } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import OfferUpdateSummaryModal from "@/components/procurement/OfferUpdateSummaryModal";
 
-// System fields we need to map, with display labels and auto-detect candidates
-const SYSTEM_FIELDS = [
-  {
-    key: "supplier_product_code",
-    label: "Código Proveedor",
-    required: false,
-    candidates: ["codigo prov", "código prov", "código", "codigo", "code", "cod", "sku", "ref"],
-  },
-  {
-    key: "supplier_product_name",
-    label: "Nombre del Producto",
-    required: true,
-    candidates: ["producto", "nombre", "name", "product", "descripcion", "description", "articulo"],
-  },
-  {
-    key: "offered_cost",
-    label: "Precio (costo ofertado)",
-    required: true,
-    candidates: ["precio oferta", "precio", "price", "cost", "costo", "valor"],
-  },
-  {
-    key: "unit",
-    label: "Unidad",
-    required: false,
-    candidates: ["unidad", "unit", "um", "udm"],
-  },
-  {
-    key: "pack_multiple",
-    label: "Unidad por Caja / Múltiplo",
-    required: false,
-    candidates: ["unidad por caja", "unidades por caja", "pack", "multiplo", "multiple", "lote"],
-  },
-  {
-    key: "min_qty",
-    label: "Cantidad Mínima",
-    required: false,
-    candidates: ["minimo", "min qty", "cantidad minima", "cant min"],
-  },
-  {
-    key: "availability",
-    label: "Disponibilidad / Stock",
-    required: false,
-    candidates: ["disponibilidad unidades", "disponibilidad", "disponible", "availability", "stock"],
-  },
-  {
-    key: "valid_until",
-    label: "Fecha Catálogo / Vigencia",
-    required: false,
-    candidates: ["fecha catálogo", "fecha catalogo", "vigencia", "valid until", "vencimiento", "hasta"],
-  },
-  {
-    key: "format",
-    label: "Categoría / Formato",
-    required: false,
-    candidates: ["categoría", "categoria", "formato", "format", "presentacion"],
-  },
-  {
-    key: "supplier_description",
-    label: "Marca / Descripción",
-    required: false,
-    candidates: ["marca", "brand", "descripcion adicional"],
-  },
-  {
-    key: "notes",
-    label: "Proveedor / Notas",
-    required: false,
-    candidates: ["proveedor", "supplier", "observaciones", "notas", "notes", "comentarios"],
-  },
+const COMPARABLE_FIELDS = [
+  "offered_cost", "supplier_product_name", "format",
+  "availability", "supplier_description", "valid_until", "pack_multiple",
 ];
 
-function detectCol(headers, candidates) {
-  const norm = headers.map((h) => (h || "").toString().toLowerCase().trim());
-  for (const c of candidates) {
-    const idx = norm.findIndex((x) => x.includes(c));
-    if (idx >= 0) return idx;
+function compareItems(existingItems, newItems) {
+  const byCode = new Map();
+  const byName = new Map();
+
+  for (const item of existingItems) {
+    const code = normalizeStr(item.supplier_product_code);
+    if (code) byCode.set(code, item);
+    byName.set(normalizeStr(item.supplier_product_name), item);
   }
-  return -1;
-}
 
-const NONE = "__none__";
+  const toInsert = [], toUpdate = [], unchanged = [], matchedIds = new Set();
 
-/**
- * Detecta automáticamente la fila de encabezados buscando la que tiene
- * más celdas no vacías con texto (y la siguiente fila también tiene datos).
- * Ignora filas de cabecera corporativa, logos, etc.
- */
-function detectHeaderRow(rows) {
-  const SEARCH_LIMIT = Math.min(rows.length, 30);
-  let bestIdx = 0;
-  let bestScore = -1;
+  for (const newItem of newItems) {
+    const code = normalizeStr(newItem.supplier_product_code);
+    const name = normalizeStr(newItem.supplier_product_name);
 
-  for (let i = 0; i < SEARCH_LIMIT; i++) {
-    const row = rows[i];
-    const nonEmpty = row.filter(c => c !== null && c !== undefined && c !== "");
-    // Preferir filas con más celdas y que parezcan encabezados (strings cortos)
-    const textCells = nonEmpty.filter(c => typeof c === "string" && c.length < 60);
-    const score = textCells.length * 2 + nonEmpty.length;
+    // Si el item trae código, buscar SOLO por código.
+    // El fallback por nombre solo aplica para items sin código (evita falsos matches
+    // entre productos distintos que comparten nombre pero tienen códigos diferentes).
+    let existing = code ? (byCode.get(code) ?? null) : (byName.get(name) ?? null);
 
-    // La fila siguiente también debe tener datos
-    const nextRow = rows[i + 1] || [];
-    const nextNonEmpty = nextRow.filter(c => c !== null && c !== undefined && c !== "").length;
-
-    if (score > bestScore && nextNonEmpty >= 2) {
-      bestScore = score;
-      bestIdx = i;
+    if (!existing) {
+      toInsert.push(newItem);
+    } else {
+      matchedIds.add(existing.id);
+      const changes = {};
+      for (const field of COMPARABLE_FIELDS) {
+        const nv = newItem[field];
+        if (nv !== undefined && nv !== null && nv !== "" && nv !== existing[field]) {
+          changes[field] = nv;
+        }
+      }
+      if (Object.keys(changes).length > 0) {
+        toUpdate.push({ id: existing.id, changes, oldItem: existing, newItem });
+      } else {
+        unchanged.push(existing);
+      }
     }
   }
-  return bestIdx;
+
+  const notInNew = existingItems.filter((item) => !matchedIds.has(item.id));
+  return { toInsert, toUpdate, unchanged, notInNew };
 }
 
 export default function OfferImporter({ offer, onImported }) {
-  const [workbook, setWorkbook] = useState(null);
+  const [sheetsData, setSheetsData] = useState([]);   // hojas del archivo: [{ name, rows }]
   const [file, setFile] = useState(null);
   const [sheets, setSheets] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState(null);
@@ -128,10 +71,16 @@ export default function OfferImporter({ offer, onImported }) {
   const [headers, setHeaders] = useState([]);
   const [preview, setPreview] = useState([]);
   const [colMap, setColMap] = useState({});
+  const [currency, setCurrency] = useState(offer?.default_currency || "USD");
+  const [currencyTouched, setCurrencyTouched] = useState(false);   // el usuario eligió la moneda a mano
+  const [useSections, setUseSections] = useState(true);            // filas de una sola celda = título de sección
+  const [includeNoPrice, setIncludeNoPrice] = useState(false);     // importar también los productos sin precio
   const [step, setStep] = useState("upload"); // upload | sheet | map | confirm
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState(null);
+  const [done, setDone] = useState(false);
+  const [updateSummary, setUpdateSummary] = useState(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [error, setError] = useState(null);
   const fileRef = useRef();
   const queryClient = useQueryClient();
@@ -141,7 +90,8 @@ export default function OfferImporter({ offer, onImported }) {
     if (!f) return;
     setFile(f);
     setError(null);
-    setResult(null);
+    setDone(false);
+    setUpdateSummary(null);
 
     if (f.name.toLowerCase().endsWith('.pdf')) {
       // ── PDF path ──
@@ -154,25 +104,22 @@ export default function OfferImporter({ offer, onImported }) {
         setHeaderRowIdx(hIdx);
         applyHeaderRow(rows, hIdx);
         setSelectedSheet("PDF");
-        setWorkbook(null);
+        setSheetsData([]);
         setStep("map");
       } catch (err) {
         setError(`Error al leer el PDF: ${err.message}`);
       }
     } else {
-      // ── Excel / CSV path ──
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const wb = XLSX.read(evt.target.result, { type: "binary" });
-        setWorkbook(wb);
-        setSheets(wb.SheetNames);
-        if (wb.SheetNames.length === 1) {
-          loadSheet(wb, wb.SheetNames[0]);
-        } else {
-          setStep("sheet");
-        }
-      };
-      reader.readAsBinaryString(f);
+      // ── Excel / CSV / ODS path ──
+      try {
+        const { sheets: sh } = await readSpreadsheetFile(f);
+        setSheetsData(sh);
+        setSheets(sh.map((x) => x.name));
+        if (sh.length === 1) loadSheet(sh, sh[0].name);
+        else setStep("sheet");
+      } catch (err) {
+        setError(`No se pudo leer el archivo: ${err.message}`);
+      }
     }
   };
 
@@ -180,18 +127,21 @@ export default function OfferImporter({ offer, onImported }) {
     const hdrs = rows[hIdx].map((h) => (h || "").toString().trim());
     setHeaders(hdrs);
     setPreview(rows.slice(hIdx + 1, hIdx + 21));
-    const map = {};
-    for (const field of SYSTEM_FIELDS) {
-      const idx = detectCol(hdrs, field.candidates);
-      map[field.key] = idx >= 0 ? idx : NONE;
-    }
-    setColMap(map);
+    setColMap(detectMapping(hdrs));
   };
 
-  const loadSheet = (wb, sheetName) => {
+  // La moneda se deduce del encabezado de la columna de precio ("PRECIO USD", "VENTA EUROS"…) salvo que el usuario la elija
+  const detectedCurrency = useMemo(
+    () => detectCurrency(allRows, headerRowIdx, colMap.offered_cost),
+    [allRows, headerRowIdx, colMap.offered_cost]);
+  useEffect(() => {
+    if (!currencyTouched) setCurrency(detectedCurrency?.code ?? offer?.default_currency ?? "USD");
+  }, [detectedCurrency, currencyTouched, offer?.default_currency]);
+
+  const loadSheet = (sheetsArr, sheetName) => {
     setSelectedSheet(sheetName);
-    const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    setCurrencyTouched(false);
+    const rows = sheetsArr.find((x) => x.name === sheetName)?.rows ?? [];
     if (rows.length < 2) { setError("La hoja seleccionada no tiene filas de datos."); return; }
     setAllRows(rows);
     const hIdx = detectHeaderRow(rows);
@@ -207,94 +157,168 @@ export default function OfferImporter({ offer, onImported }) {
   };
 
   const handleSheetSelect = (sheetName) => {
-    loadSheet(workbook, sheetName);
+    loadSheet(sheetsData, sheetName);
   };
+
+  // Qué se va a importar, calculado con las columnas y opciones actuales
+  const analysis = useMemo(
+    () => (step === "map" && allRows.length ? buildItems(allRows, headerRowIdx, colMap, { currency, useSections, includeNoPrice }).stats : null),
+    [step, allRows, headerRowIdx, colMap, currency, useSections, includeNoPrice]);
 
   const handleImport = async () => {
     setImporting(true);
-    setProgress(10);
+    setProgress(5);
 
-    const rows = workbook?.Sheets?.[selectedSheet]
-      ? XLSX.utils.sheet_to_json(workbook.Sheets[selectedSheet], { header: 1, defval: "" })
-      : allRows;
-    const dataRows = rows.slice(headerRowIdx + 1).filter((r) => r.some((c) => c !== ""));
-    setProgress(30);
+    // Obtener usuario actual para registrar quién importó
+    let currentUser = null;
+    try { currentUser = await base44.auth.me(); } catch (_) {}
+    const importedBy = currentUser?.email || currentUser?.full_name || null;
 
-    const nameIdx = colMap.supplier_product_name;
-    const hasNameCol = nameIdx !== NONE && nameIdx !== undefined;
+    setProgress(15);
 
-    let validRows = 0, invalidRows = 0;
-    const items = [];
-
-    dataRows.forEach((row, i) => {
-      const name = hasNameCol ? (row[nameIdx] || "").toString().trim() : "";
-      if (!name) { invalidRows++; return; }
-
-      const item = {
-        offer_id: offer.id,
-        row_number: i + 2,
-        supplier_product_name: name,
-        is_valid: true,
-        min_qty: 1,
-        pack_multiple: 1,
-        currency: offer.default_currency || "USD",
-      };
-
-      for (const field of SYSTEM_FIELDS) {
-        if (field.key === "supplier_product_name") continue;
-        const idx = colMap[field.key];
-        if (idx === NONE || idx === undefined) continue;
-        const val = row[idx];
-        if (val === "" || val === undefined || val === null) continue;
-
-        if (["offered_cost", "min_qty", "pack_multiple", "lead_time_days"].includes(field.key)) {
-          const n = parseFloat(val);
-          if (!isNaN(n)) item[field.key] = n;
-        } else {
-          item[field.key] = val.toString().trim();
-        }
-      }
-
-      items.push(item);
-      validRows++;
-    });
-
-    setProgress(50);
-    const BATCH = 50;
-    for (let i = 0; i < items.length; i += BATCH) {
-      await base44.entities.SupplierOfferItem.bulkCreate(items.slice(i, i + BATCH));
-      setProgress(50 + Math.round(((i + BATCH) / items.length) * 40));
+    // Interpretación de las filas (títulos de sección → categoría, sin precio, moneda, fechas…)
+    const { items: dedupedItems, stats } = buildItems(allRows, headerRowIdx, colMap, { currency, useSections, includeNoPrice });
+    const invalidRows = stats.sinNombre + stats.ignoradas;
+    if (!dedupedItems.length) {
+      setImporting(false);
+      setError("No se encontró ningún producto para importar con las columnas elegidas.");
+      return;
     }
 
+    setProgress(25);
+
+    // Traer TODOS los items existentes de esta oferta, página a página, desde la API de REAB
+    // (máximo 200 por página; se ordena por row_number para que la paginación sea estable)
+    let existingItems = [];
+    {
+      const PAGE = 200;
+      let offset = 0;
+      while (true) {
+        const { data, total } = await base44.entities.SupplierOfferItem.filterPaginated(
+          { offer_id: offer.id },
+          { limit: PAGE, offset, orderBy: "row_number" },
+        );
+        existingItems = existingItems.concat(data ?? []);
+        offset += PAGE;
+        if ((data?.length ?? 0) < PAGE || existingItems.length >= (total ?? Infinity)) break;
+      }
+    }
+    setProgress(40);
+
+    // Comparar y categorizar
+    const { toInsert, toUpdate, unchanged, notInNew } = compareItems(existingItems, dedupedItems);
+    setProgress(50);
+
+    // Asignar row_number a los nuevos items (usar reduce para evitar stack overflow con arrays grandes)
+    const maxRowNum = existingItems.reduce((m, i) => Math.max(m, i.row_number || 0), 0);
+    toInsert.forEach((item, idx) => {
+      item.offer_id = offer.id;
+      item.row_number = maxRowNum + idx + 1;
+    });
+
+    // Insertar nuevos en lotes
+    const BATCH = 50;
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      await base44.entities.SupplierOfferItem.bulkCreate(toInsert.slice(i, i + BATCH));
+      setProgress(50 + Math.round(((i + BATCH) / Math.max(toInsert.length + toUpdate.length, 1)) * 35));
+    }
+
+    // Actualizar items modificados en lotes concurrentes
+    const UPDATE_BATCH = 20;
+    for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
+      await Promise.all(
+        toUpdate.slice(i, i + UPDATE_BATCH).map((u) =>
+          base44.entities.SupplierOfferItem.update(u.id, u.changes)
+        )
+      );
+      setProgress(50 + Math.round((toInsert.length + i + UPDATE_BATCH) / Math.max(toInsert.length + toUpdate.length, 1) * 35));
+    }
+
+    // Insertar historial de precios para los items cuyo costo cambió
+    const priceChanges = toUpdate
+      .filter((u) => u.changes.offered_cost !== undefined && u.changes.offered_cost !== u.oldItem.offered_cost)
+      .map((u) => ({
+        offer_item_id: u.id,
+        old_cost: u.oldItem.offered_cost ?? null,
+        new_cost: u.changes.offered_cost,
+        imported_by: importedBy,
+        source_file: file?.name || null,
+      }));
+
+    // El historial de precios es secundario: si no se puede guardar (p. ej. el rol no tiene permiso
+    // de escritura en ese recurso) la importación de la oferta no debe fallar.
+    if (priceChanges.length > 0) {
+      try {
+        await base44.entities.OfferItemPriceHistory.bulkCreate(priceChanges);
+      } catch (err) {
+        console.warn("[importación] no se pudo guardar el historial de precios:", err.message);
+      }
+    }
+
+    setProgress(90);
+
+    const totalItems = existingItems.length + toInsert.length;
     await base44.entities.SupplierOffer.update(offer.id, {
-      status: "imported",
-      total_rows: dataRows.length,
-      valid_rows: validRows,
+      total_rows: totalItems,
+      valid_rows: totalItems,
       invalid_rows: invalidRows,
       source_file_name: file.name,
     });
 
     setProgress(100);
-    setResult({ total: dataRows.length, validRows, invalidRows });
-    queryClient.invalidateQueries({ queryKey: ["supplier-offers"] });
-    queryClient.invalidateQueries({ queryKey: ["offer-items", offer.id] });
+
+    const summary = {
+      inserted: toInsert,
+      updated: toUpdate,
+      unchanged: unchanged.length,
+      notInNew,
+      totalExtracted: stats.filas,
+      invalidRows,
+      sections: stats.secciones,
+      noPrice: stats.sinPrecio,
+    };
+    setUpdateSummary(summary);
+    setSummaryOpen(true);
+    setDone(true);
     setImporting(false);
+
+    queryClient.invalidateQueries({ queryKey: ["supplier-offers"] });
+    queryClient.invalidateQueries({ queryKey: ["offer-items-all", offer.id] });
     onImported?.();
   };
 
-  // ── Result ──
-  if (result) {
+  // ── Done state ──
+  if (done) {
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-success font-semibold">
-          <CheckCircle2 size={18} /> Importación completada
+      <>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-emerald-600 font-semibold">
+            <CheckCircle2 size={18} /> Oferta actualizada correctamente
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center text-sm">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xl font-bold text-blue-700">{updateSummary?.inserted?.length ?? 0}</p>
+              <p className="text-xs text-blue-600">Nuevos</p>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-xl font-bold text-amber-700">{updateSummary?.updated?.length ?? 0}</p>
+              <p className="text-xs text-amber-600">Actualizados</p>
+            </div>
+            <div className="bg-muted border border-border rounded-lg p-3">
+              <p className="text-xl font-bold text-muted-foreground">{updateSummary?.unchanged ?? 0}</p>
+              <p className="text-xs text-muted-foreground">Sin cambios</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setSummaryOpen(true)}>
+            Ver detalle completo
+          </Button>
         </div>
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="bg-muted rounded-lg p-3"><p className="text-xl font-bold">{result.total}</p><p className="text-xs text-muted-foreground">Total filas</p></div>
-          <div className="bg-success/10 rounded-lg p-3"><p className="text-xl font-bold text-success">{result.validRows}</p><p className="text-xs text-muted-foreground">Válidas</p></div>
-          <div className="bg-destructive/10 rounded-lg p-3"><p className="text-xl font-bold text-destructive">{result.invalidRows}</p><p className="text-xs text-muted-foreground">Inválidas</p></div>
-        </div>
-      </div>
+        <OfferUpdateSummaryModal
+          open={summaryOpen}
+          onClose={() => setSummaryOpen(false)}
+          summary={updateSummary}
+        />
+      </>
     );
   }
 
@@ -454,6 +478,49 @@ export default function OfferImporter({ offer, onImported }) {
             </p>
           )}
         </div>
+
+        {/* Qué se va a importar */}
+        {analysis && (
+          <div className="border border-border rounded-lg p-3 space-y-3 bg-muted/20">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Qué se va a importar</p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="px-2 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold">{analysis.productos.toLocaleString()} productos</span>
+              {analysis.secciones > 0 && <span className="px-2 py-1 rounded-md bg-blue-50 border border-blue-200 text-blue-800" title="Filas de una sola celda: no son productos; su texto pasa a la categoría de los productos que siguen">{analysis.secciones} títulos de sección → categorías</span>}
+              {analysis.sinPrecio > 0 && <span className="px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-amber-800">{analysis.sinPrecio} sin precio {includeNoPrice ? "(se importan)" : "(se omiten)"}</span>}
+              {analysis.sinNombre > 0 && <span className="px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground">{analysis.sinNombre} filas sin nombre omitidas</span>}
+              {analysis.repetidos > 0 && <span className="px-2 py-1 rounded-md bg-muted border border-border text-muted-foreground" title="El mismo código aparece más de una vez: se usa la primera">{analysis.repetidos} códigos repetidos</span>}
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3 items-start">
+              <div className="space-y-1.5">
+                <label className="flex items-start gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" checked={useSections} onChange={(e) => setUseSections(e.target.checked)} className="mt-0.5" />
+                  <span>Tratar las filas de una sola celda como <strong>títulos de sección</strong> (categoría), no como productos</span>
+                </label>
+                {colMap.offered_cost !== NONE && colMap.offered_cost !== undefined && (
+                  <label className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={includeNoPrice} onChange={(e) => setIncludeNoPrice(e.target.checked)} className="mt-0.5" />
+                    <span>Importar también los productos <strong>sin precio</strong></span>
+                  </label>
+                )}
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Moneda de los precios</label>
+                <select
+                  value={currency}
+                  onChange={(e) => { setCurrency(e.target.value); setCurrencyTouched(true); }}
+                  className="w-full h-8 text-xs border border-input rounded px-1.5 bg-background"
+                >
+                  {[...new Set([currency, "USD", "EUR", "CUP", "MLC", "GBP", "CAD"])].map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <p className="text-[10px] text-muted-foreground">
+                  {detectedCurrency && !currencyTouched
+                    ? `Detectada en el encabezado "${detectedCurrency.from}". Cámbiala si no es correcta.`
+                    : currencyTouched ? "Elegida por ti." : "No se encontró la moneda en el archivo: se usa la de la oferta."}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {importing && (
           <div className="space-y-1.5">

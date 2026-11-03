@@ -1,15 +1,18 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { finalizePurchaseOrder } from "@/api/reabApiClient";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ShoppingCart, Info, Sparkles, Loader2 } from "lucide-react";
+import { ShoppingCart, Info, Sparkles, Loader2, HelpCircle, Star } from "lucide-react";
+import IndicesHelpModal from "@/components/IndicesHelpModal";
 import { useToast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { useProcurementUser } from "@/hooks/useProcurementUser";
-import { fetchSalesIndices } from "@/api/salesIndicesClient";
+import { fetchSalesIndicesByIds, computeIndiceAvg } from "@/api/salesIndicesClient";
+import { getUserPreferences, SELECTABLE_INDICES, DEFAULT_SELECTED_INDICES } from "@/api/userPreferencesClient";
 
 const DIAS_MIN_OPTIONS = [7, 15, 30, 45, 60];
 const DIAS_MAX_OPTIONS = [45, 60, 90, 120];
@@ -57,7 +60,7 @@ function formatAlmacen(name) {
   return m ? m[1] : name;
 }
 
-export default function ProposalTable({ offer, matches, offerItems, internalOffers, onOrderCreated }) {
+export default function ProposalTable({ offer, matches, offerItems, internalOffers, newItems = [], onOrderCreated }) {
   const { toast }   = useToast();
   const queryClient = useQueryClient();
   const navigate    = useNavigate();
@@ -66,12 +69,38 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
   const [diasMin, setDiasMin] = useState(30);
   const [diasMax, setDiasMax] = useState(90);
   const [creating, setCreating] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
+
+  const offerIds = useMemo(() =>
+    [...new Set(matches.map(m => m.internal_offer_id).filter(Boolean).map(String))],
+    [matches]
+  );
 
   const { data: salesMap = new Map(), isFetching: loadingSales } = useQuery({
-    queryKey:  ["sales-indices-db"],
-    queryFn:   fetchSalesIndices,
+    queryKey:  ["sales-indices-db", offerIds],
+    queryFn:   () => fetchSalesIndicesByIds(offerIds),
     staleTime: 30 * 60 * 1000,
+    enabled:   offerIds.length > 0,
   });
+
+  const { data: userPrefs } = useQuery({
+    queryKey:  ["user-preferences"],
+    queryFn:   getUserPreferences,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const selectedIndices = useMemo(() => {
+    const keys = userPrefs?.selected_indices?.length
+      ? userPrefs.selected_indices
+      : DEFAULT_SELECTED_INDICES;
+    return keys.map(k => SELECTABLE_INDICES.find(i => i.key === k)).filter(Boolean);
+  }, [userPrefs]);
+
+  const selectedKeys = useMemo(
+    () => selectedIndices.map(i => i.key),
+    [selectedIndices]
+  );
 
   const rows = useMemo(() => {
     return matches
@@ -85,7 +114,7 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
         const ef        = internal?.cantidad ?? internal?.existencia_fisica ?? 0;
         const extId     = String(match.internal_offer_id ?? "");
         const salesData = extId ? salesMap.get(extId) : null;
-        const indice    = salesData?.indiceAvg ?? 0;
+        const indice    = computeIndiceAvg(salesData, selectedKeys) ?? 0;
 
         const minQty       = item?.min_qty      ?? 1;
         const packMultiple = item?.pack_multiple ?? 1;
@@ -108,9 +137,12 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
           matchId:       match.id,
           itemId:        match.offer_item_id,
           supplierCode:  item?.supplier_product_code || "—",
+          supplierName:  item?.supplier_product_name || "",
           idTienda:      match.internal_offer_id || "—",
           code:          match.internal_product_code || "—",
           name:          match.internal_product_name || item?.supplier_product_name || "",
+          foto:          internal?.fotos?.[0]?.foto ?? null,
+          salesData,
           almacen:       internal?.proveedor || "—",
           unitCost:      item?.offered_cost ?? 0,
           precioCosto:   internal?.precio ?? null,
@@ -125,11 +157,22 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
           suggestedQty,
         };
       });
-  }, [matches, offerItems, internalOffers, offer, diasMin, diasMax, salesMap]);
+  }, [matches, offerItems, internalOffers, offer, diasMin, diasMax, salesMap, selectedKeys]);
 
   const [decisions, setDecisions] = useState({});
+  const [newDecisions, setNewDecisions] = useState({});
 
-  useMemo(() => {
+  useEffect(() => {
+    setNewDecisions(prev => {
+      const next = { ...prev };
+      newItems.forEach(item => {
+        if (!next[item.id]) next[item.id] = { finalQty: item.min_qty || 1, included: true };
+      });
+      return next;
+    });
+  }, [newItems]);
+
+  useEffect(() => {
     setDecisions((prev) => {
       const next = { ...prev };
       rows.forEach((r) => {
@@ -139,7 +182,7 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
       });
       return next;
     });
-  }, [rows.length]);
+  }, [rows]);
 
   const update = (matchId, field, value) =>
     setDecisions((prev) => ({ ...prev, [matchId]: { ...prev[matchId], [field]: value } }));
@@ -147,12 +190,15 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
   const includedRows = rows.filter(
     (r) => decisions[r.matchId]?.included && (decisions[r.matchId]?.finalQty || 0) > 0
   );
-  const totalAmount = includedRows.reduce(
-    (sum, r) => sum + (decisions[r.matchId]?.finalQty || 0) * r.unitCost, 0
+  const includedNewItems = newItems.filter(
+    (item) => newDecisions[item.id]?.included && (newDecisions[item.id]?.finalQty || 0) > 0
   );
+  const totalAmount =
+    includedRows.reduce((sum, r) => sum + (decisions[r.matchId]?.finalQty || 0) * r.unitCost, 0) +
+    includedNewItems.reduce((sum, item) => sum + (newDecisions[item.id]?.finalQty || 0) * (item.offered_cost || 0), 0);
 
   const handleCreate = async () => {
-    if (includedRows.length === 0) {
+    if (includedRows.length === 0 && includedNewItems.length === 0) {
       toast({ title: "Sin productos", description: "Selecciona al menos un producto con cantidad > 0.", variant: "destructive" });
       return;
     }
@@ -166,7 +212,7 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
         currency:      offer.default_currency || "USD",
         exchange_rate: offer.exchange_rate || 1,
         total_amount:  totalAmount,
-        total_items:   includedRows.length,
+        total_items:   includedRows.length + includedNewItems.length,
         created_by:    user?.email || "",
       });
 
@@ -180,7 +226,9 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
           offer_item_id:         r.itemId,
           internal_offer_id:     r.idTienda,
           internal_product_code: r.code,
-          product_name:          r.name,
+          supplier_product_code: r.supplierCode !== "—" ? r.supplierCode : null,
+          product_name:          r.supplierName || r.name,
+          supplier_product_name: r.supplierName || null,
           unit_cost:             r.unitCost,
           currency:              r.currency,
           min_qty:               r.minQty,
@@ -189,10 +237,38 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
           suggested_qty:         r.suggestedQty,
           final_qty:             d.finalQty,
           status:                "included",
+          is_new_product:        false,
         };
       });
 
-      await base44.entities.PurchaseOrderItem.bulkCreate(orderItems);
+      // Productos Nuevos — sin asociación interna, cantidad decidida por el comercial
+      const newOrderItems = includedNewItems.map((item) => {
+        const d = newDecisions[item.id];
+        return {
+          purchase_order_id:     order.id,
+          order_id:              order.id,
+          cantidad:              d.finalQty,
+          precio_unitario:       item.offered_cost || 0,
+          offer_item_id:         item.id,
+          internal_offer_id:     null,
+          internal_product_code: null,
+          supplier_product_code: item.supplier_product_code || null,
+          product_name:          item.supplier_product_name || item.supplier_product_code || "Producto Nuevo",
+          supplier_product_name: item.supplier_product_name || null,
+          unit_cost:             item.offered_cost || 0,
+          currency:              item.currency || offer.default_currency || "USD",
+          min_qty:               item.min_qty || 1,
+          pack_multiple:         item.pack_multiple || 1,
+          current_stock:         0,
+          suggested_qty:         0,
+          final_qty:             d.finalQty,
+          status:                "included",
+          is_new_product:        true,
+        };
+      });
+
+      await base44.entities.PurchaseOrderItem.bulkCreate([...orderItems, ...newOrderItems]);
+      await finalizePurchaseOrder(order.id, "pendiente_revision");
       await base44.entities.SupplierOffer.update(offer.id, { status: "ordered" });
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
       queryClient.invalidateQueries({ queryKey: ["supplier-offers"] });
@@ -217,6 +293,18 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
 
   return (
     <div className="space-y-4">
+
+      {/* Popup foto fijo — escapa del overflow-x del contenedor de tabla */}
+      {photoPreview && (
+        <div
+          className="fixed z-[9999] pointer-events-none"
+          style={{ left: photoPreview.x, top: photoPreview.y }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl border border-border p-1.5">
+            <img src={photoPreview.url} alt={photoPreview.name} className="h-40 w-40 object-contain rounded-lg" />
+          </div>
+        </div>
+      )}
 
       {/* Banner de carga de índices */}
       {loadingSales && (
@@ -277,27 +365,61 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
         </Badge>
       </div>
 
+      {/* Guía de índices */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowHelp(true)}
+          className="text-[11px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+        >
+          <HelpCircle size={11} />
+          ¿Qué significan los índices?
+        </button>
+      </div>
+
       {/* Tabla */}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto overflow-y-auto rounded-lg border border-border" style={{ maxHeight: "52vh" }}>
         <table className="w-full text-xs" style={{ minWidth: "1100px" }}>
           <thead>
-            <tr className="bg-muted/50 border-b border-border">
-              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground w-7">✓</th>
-              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">COD PROV</th>
-              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">ID Tienda</th>
-              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">Cód. Prod. TKC</th>
-              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground min-w-[130px]">Nombre TKC</th>
-              <th className="px-2 py-2.5 text-center font-medium text-muted-foreground whitespace-nowrap">No. Almacén</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground">Stock</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground" title="Índice promedio ventas diarias">I.AVG</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground" title={`Stock Mínimo (${diasMin} días)`}>S.Mín</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground" title={`Stock Máximo (${diasMax} días)`}>S.Máx</th>
-              <th className="px-2 py-2.5 text-center font-medium text-muted-foreground">Estado</th>
-              <th className="px-2 py-2.5 text-right font-medium text-blue-500">Prop. Pedido</th>
-              <th className="px-2 py-2.5 text-center font-medium text-primary">Cant. Final ✍</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">💰 P. Oferta Prov.</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">💰 P. Costo TKC</th>
-              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground">Subtotal</th>
+            <tr className="bg-muted/50 border-b border-border sticky top-0 z-10">
+              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground w-7 bg-muted/80">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  title={rows.every(r => decisions[r.matchId]?.included) ? "Desmarcar todos" : "Marcar todos"}
+                  checked={rows.length > 0 && rows.every(r => decisions[r.matchId]?.included)}
+                  ref={el => {
+                    if (el) el.indeterminate = rows.some(r => decisions[r.matchId]?.included) && !rows.every(r => decisions[r.matchId]?.included);
+                  }}
+                  onChange={e => {
+                    const val = e.target.checked;
+                    setDecisions(prev => {
+                      const next = { ...prev };
+                      rows.forEach(r => { next[r.matchId] = { ...next[r.matchId], included: val }; });
+                      return next;
+                    });
+                  }}
+                />
+              </th>
+              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap bg-muted/80">COD PROV</th>
+              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap bg-muted/80">ID Tienda</th>
+              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap bg-muted/80">Cód. Prod. TKC</th>
+              <th className="px-2 py-2.5 text-left font-medium text-muted-foreground min-w-[130px] bg-muted/80">Nombre TKC</th>
+              <th className="px-2 py-2.5 text-center font-medium text-muted-foreground whitespace-nowrap bg-muted/80">No. Almacén</th>
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground bg-muted/80">Stock</th>
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground bg-muted/80" title="Índice promedio ventas diarias (fórmula)">I.AVG</th>
+              {selectedIndices.map(idx => (
+                <th key={idx.key} className="px-2 py-2.5 text-right font-medium text-violet-500 bg-muted/80 whitespace-nowrap" title={idx.label}>
+                  {idx.short}
+                </th>
+              ))}
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground bg-muted/80" title={`Stock Mínimo (${diasMin} días)`}>S.Mín</th>
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground bg-muted/80" title={`Stock Máximo (${diasMax} días)`}>S.Máx</th>
+              <th className="px-2 py-2.5 text-center font-medium text-muted-foreground bg-muted/80">Estado</th>
+              <th className="px-2 py-2.5 text-right font-medium text-blue-500 bg-muted/80">Prop. Pedido</th>
+              <th className="px-2 py-2.5 text-center font-medium text-primary bg-muted/80">Cant. Final ✍</th>
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap bg-muted/80">💰 P. Oferta Prov.</th>
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap bg-muted/80">💰 P. Costo TKC</th>
+              <th className="px-2 py-2.5 text-right font-medium text-muted-foreground bg-muted/80">Subtotal</th>
             </tr>
           </thead>
           <tbody>
@@ -322,16 +444,38 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
                   <td className="px-2 py-2.5 font-mono text-muted-foreground whitespace-nowrap">{r.supplierCode}</td>
                   <td className="px-2 py-2.5 font-mono text-xs whitespace-nowrap">{r.idTienda}</td>
                   <td className="px-2 py-2.5 font-mono text-primary font-semibold whitespace-nowrap">{r.code}</td>
-                  <td className="px-2 py-2.5 max-w-[160px]" title={r.name}>
-                    <p className="font-medium truncate">{r.name}</p>
+                  <td className="px-2 py-2.5 min-w-[200px] max-w-[300px]">
+                    <div className="flex items-start gap-1.5">
+                      {r.foto && (
+                        <img
+                          src={r.foto}
+                          alt=""
+                          className="h-6 w-6 rounded object-cover cursor-zoom-in border border-border/50 flex-shrink-0 mt-0.5"
+                          onMouseEnter={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setPhotoPreview({ url: r.foto, name: r.name, x: rect.right + 8, y: rect.top });
+                          }}
+                          onMouseLeave={() => setPhotoPreview(null)}
+                        />
+                      )}
+                      <p className="font-medium text-wrap break-words" title={r.name}>{r.name}</p>
+                    </div>
                   </td>
                   <td className="px-2 py-2.5 text-muted-foreground whitespace-nowrap text-center" title={r.almacen}>
                     <span className="text-[10px]">{formatAlmacen(r.almacen)}</span>
                   </td>
                   <td className="px-2 py-2.5 text-right font-semibold">{r.currentStock}</td>
                   <td className="px-2 py-2.5 text-right font-mono text-muted-foreground">
-                    {r.indice > 0 ? r.indice.toFixed(3) : "—"}
+                    {r.indice > 0 ? (r.indice >= 1 ? Math.round(r.indice) : r.indice.toFixed(3)) : "—"}
                   </td>
+                  {selectedIndices.map(idx => {
+                    const val = r.salesData?.[idx.key] ?? null;
+                    return (
+                      <td key={idx.key} className="px-2 py-2.5 text-right font-mono text-violet-600 text-[11px]">
+                        {val != null ? (val >= 1 ? Math.round(val) : val.toFixed(3)) : "—"}
+                      </td>
+                    );
+                  })}
                   <td className="px-2 py-2.5 text-right text-muted-foreground">{r.stockMin || "—"}</td>
                   <td className="px-2 py-2.5 text-right text-muted-foreground">{r.stockMax || "—"}</td>
                   <td className="px-2 py-2.5 text-center">
@@ -374,13 +518,122 @@ export default function ProposalTable({ offer, matches, offerItems, internalOffe
         </table>
       </div>
 
-      <Button onClick={handleCreate} disabled={creating || includedRows.length === 0} className="w-full">
-        <ShoppingCart size={15} className="mr-2" />
-        {creating
-          ? "Generando pedido..."
-          : `Generar Pedido — ${includedRows.length} productos · ${offer.default_currency || "USD"} ${totalAmount.toFixed(2)}`
-        }
-      </Button>
+      {/* ── Bloque Productos Nuevos ── */}
+      {newItems.length > 0 && (
+        <div className="rounded-lg border border-amber-300 dark:border-amber-700 overflow-hidden">
+          <div className="bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 flex items-center gap-2 border-b border-amber-200 dark:border-amber-700">
+            <Star size={13} className="text-amber-600 dark:text-amber-400 fill-amber-400" />
+            <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+              Productos Nuevos — sin asociación interna
+            </span>
+            <span className="text-[10px] text-amber-600 dark:text-amber-400 ml-1">
+              · Cantidad a criterio del comercial · Sin stock ni índices
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-amber-50/60 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-800">
+                  <th className="px-3 py-2 w-7">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={newItems.length > 0 && newItems.every(i => newDecisions[i.id]?.included)}
+                      onChange={e => {
+                        const val = e.target.checked;
+                        setNewDecisions(prev => {
+                          const next = { ...prev };
+                          newItems.forEach(i => { next[i.id] = { ...next[i.id], included: val }; });
+                          return next;
+                        });
+                      }}
+                    />
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Cód. Proveedor</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground min-w-[200px]">Nombre del Producto</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Precio Unit.</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Mín.</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Múlt.</th>
+                  <th className="px-3 py-2 text-center font-medium text-primary">Cant. Final ✍</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {newItems.map((item) => {
+                  const d = newDecisions[item.id] || { finalQty: item.min_qty || 1, included: true };
+                  const warnings = getWarnings(d.finalQty || 0, item.min_qty || 1, item.pack_multiple || 1);
+                  const subtotal = (d.finalQty || 0) * (item.offered_cost || 0);
+                  const currency = item.currency || offer.default_currency || "USD";
+                  return (
+                    <tr key={item.id} className={`border-b border-amber-100 dark:border-amber-900/30 last:border-0 transition-opacity ${!d.included ? "opacity-40" : ""}`}>
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          checked={!!d.included}
+                          onChange={e => setNewDecisions(prev => ({ ...prev, [item.id]: { ...prev[item.id], included: e.target.checked } }))}
+                          className="rounded"
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-muted-foreground whitespace-nowrap">
+                        {item.supplier_product_code || "—"}
+                      </td>
+                      <td className="px-3 py-2.5 font-medium max-w-[300px]">
+                        <span className="block text-wrap break-words">{item.supplier_product_name || "—"}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        {currency} {(item.offered_cost || 0).toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{item.min_qty || 1}</td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{item.pack_multiple || 1}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Input
+                            type="number" min={0}
+                            value={d.finalQty ?? ""}
+                            onChange={e => setNewDecisions(prev => ({ ...prev, [item.id]: { ...prev[item.id], finalQty: parseInt(e.target.value) || 0 } }))}
+                            disabled={!d.included}
+                            className={`h-7 w-20 text-center text-xs ${warnings.length ? "border-orange-400" : "border-amber-300 focus:border-amber-500"}`}
+                          />
+                          {warnings.map((w, i) => (
+                            <span key={i} className="text-orange-500 text-[10px]">{w}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">
+                        {currency} {subtotal.toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {includedNewItems.length > 0 && (
+                <tfoot>
+                  <tr className="border-t border-amber-200 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-900/10">
+                    <td colSpan={7} className="px-3 py-2 text-right text-xs font-semibold text-amber-700 dark:text-amber-400">
+                      Subtotal Productos Nuevos:
+                    </td>
+                    <td className="px-3 py-2 text-right font-bold text-xs text-amber-700 dark:text-amber-400">
+                      {offer.default_currency || "USD"} {includedNewItems.reduce((s, i) => s + (newDecisions[i.id]?.finalQty || 0) * (i.offered_cost || 0), 0).toFixed(2)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="sticky bottom-0 bg-background/95 backdrop-blur-sm pt-2 pb-1 border-t border-border -mx-1 px-1">
+        <Button onClick={handleCreate} disabled={creating || (includedRows.length === 0 && includedNewItems.length === 0)} className="w-full">
+          <ShoppingCart size={15} className="mr-2" />
+          {creating
+            ? "Generando pedido..."
+            : `Generar Pedido — ${includedRows.length + includedNewItems.length} productos · ${offer.default_currency || "USD"} ${totalAmount.toFixed(2)}`
+          }
+        </Button>
+      </div>
+
+      <IndicesHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
 }

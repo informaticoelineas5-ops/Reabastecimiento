@@ -8,7 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Truck, Plus, Search, ExternalLink, Calendar, Package } from "lucide-react";
+import SearchSelect from "@/components/common/SearchSelect";
+import { FilterBar, FilterField, FilterSearch } from "@/components/common/FilterBar";
+import { ListFilter } from "lucide-react";
+import { Truck, Plus, ExternalLink, Calendar, Package } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useProcurementUser } from "@/hooks/useProcurementUser";
 import { format } from "date-fns";
@@ -27,22 +30,22 @@ const STATUS_LABELS = {
 const EMPTY_FORM = { supplier_name: "", supplier_id: null, offer_name: "", valid_from: "", valid_until: "", notes: "" };
 
 export default function SupplierOffers() {
-  const { user, isLoading: loadingUser, isAdmin, getOwnerFilter } = useProcurementUser();
+  const { user, isLoading: loadingUser, isAdmin } = useProcurementUser();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [supplierMode, setSupplierMode] = useState("select"); // "select" | "new"
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
-  const filter = getOwnerFilter();
+  const today = new Date().toISOString().slice(0, 10);
 
   const { data: offers = [], isLoading } = useQuery({
-    queryKey: ["supplier-offers", filter],
-    queryFn: () => filter
-      ? base44.entities.SupplierOffer.filter(filter, "-created_date", 200)
-      : base44.entities.SupplierOffer.list("-created_date", 200),
+    queryKey: ["supplier-offers"],
+    queryFn: () => base44.entities.SupplierOffer.list("-created_date", 200),
     enabled: !loadingUser,
   });
 
@@ -54,9 +57,14 @@ export default function SupplierOffers() {
   const filtered = offers.filter((o) => {
     const q = search.toLowerCase();
     const matchSearch = !q || (o.supplier_name || "").toLowerCase().includes(q) || (o.offer_name || "").toLowerCase().includes(q);
-    const matchStatus = statusFilter === "all" || o.status === statusFilter;
+    const isExpiredByDate = o.valid_until && o.valid_until < today;
+    const matchStatus =
+      statusFilter === "all" ||
+      (statusFilter === "expired" ? isExpiredByDate : o.status === statusFilter);
     return matchSearch && matchStatus;
   });
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleCreate = async () => {
     if (!form.supplier_name || !form.offer_name) return;
@@ -71,8 +79,6 @@ export default function SupplierOffers() {
       setSaving(false);
     }
   };
-
-  const today = new Date().toISOString().slice(0, 10);
 
   if (loadingUser || isLoading) {
     return <div className="p-6 space-y-3">{Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>;
@@ -97,20 +103,37 @@ export default function SupplierOffers() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={14} className="absolute left-2.5 top-2.5 text-muted-foreground" />
-          <Input placeholder="Buscar proveedor u oferta..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-9" />
+      {/* Mini stats */}
+      {offers.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: "Total", value: offers.length, cls: "text-foreground" },
+            { label: "Vigentes", value: offers.filter(o => o.status !== "expired" && o.status !== "archived" && (!o.valid_until || o.valid_until >= today)).length, cls: "text-success" },
+            { label: "Vencidas", value: offers.filter(o => o.valid_until && o.valid_until < today).length, cls: "text-destructive" },
+            { label: "Con pedido", value: offers.filter(o => o.status === "ordered").length, cls: "text-primary" },
+            { label: "Pendiente asoc.", value: offers.filter(o => o.status === "partially_matched" || o.status === "imported").length, cls: "text-warning" },
+          ].map(({ label, value, cls }) => (
+            <div key={label} className="flex items-center gap-1.5 bg-muted/60 border border-border/50 rounded-lg px-3 py-1.5 text-xs">
+              <span className={`font-bold text-sm ${cls}`}>{value}</span>
+              <span className="text-muted-foreground">{label}</span>
+            </div>
+          ))}
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[160px] h-9 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los estados</SelectItem>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      )}
+
+      {/* Filters */}
+      <FilterBar>
+        <FilterSearch value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Proveedor u oferta…" className="w-[240px]" />
+        <FilterField icon={ListFilter} label="Estado de la oferta">
+          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              {Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </FilterField>
+      </FilterBar>
 
       {/* List */}
       <div className="space-y-2">
@@ -120,7 +143,7 @@ export default function SupplierOffers() {
             <p className="text-sm text-muted-foreground">No hay ofertas. Crea una nueva para empezar.</p>
           </Card>
         ) : (
-          filtered.map((offer) => {
+          paginated.map((offer) => {
             const status = STATUS_LABELS[offer.status] || { label: offer.status, color: "secondary" };
             const isExpired = offer.valid_until && offer.valid_until < today;
             return (
@@ -154,6 +177,33 @@ export default function SupplierOffers() {
         )}
       </div>
 
+      {/* Paginación */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-xs text-muted-foreground">
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} de {filtered.length} ofertas
+          </p>
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+              ← Anterior
+            </Button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+              <Button
+                key={p} size="sm"
+                variant={p === page ? "default" : "outline"}
+                className="h-7 w-7 text-xs p-0"
+                onClick={() => setPage(p)}
+              >
+                {p}
+              </Button>
+            ))}
+            <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+              Siguiente →
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Create Dialog */}
       <Dialog open={showCreate} onOpenChange={(open) => { setShowCreate(open); if (!open) { setForm(EMPTY_FORM); setSupplierMode("select"); } }}>
         <DialogContent className="max-w-md">
@@ -165,22 +215,15 @@ export default function SupplierOffers() {
               <div className="mt-1 space-y-2">
                 {supplierMode === "select" ? (
                   <div className="flex gap-2">
-                    <Select
+                    <SearchSelect
                       value={form.supplier_name}
-                      onValueChange={v => {
+                      onChange={v => {
                         const s = suppliers.find((/** @type {any} */ x) => x.name === v);
                         setForm(p => ({ ...p, supplier_name: v, supplier_id: s?.id ?? null }));
                       }}
-                    >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Seleccionar proveedor..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {suppliers.map(s => (
-                          <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={suppliers.map((/** @type {any} */ s) => s.name)}
+                      placeholder="Busca o selecciona un proveedor..." size="md" className="flex-1"
+                    />
                     <Button
                       type="button" variant="outline" size="sm"
                       onClick={() => { setSupplierMode("new"); setForm(p => ({ ...p, supplier_name: "" })); }}

@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
-import * as XLSX from "xlsx";
 import { parsePdfToRows } from "@/utils/pdfParser";
+import { readSpreadsheetFile } from "@/utils/spreadsheet";
+import { NONE, detectCol, detectHeaderRow } from "@/utils/offerParsing";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,76 +30,56 @@ const CONF_FIELDS = [
   },
 ];
 
-const NONE = "__none__";
-
-function detectCol(headers, candidates) {
-  const norm = headers.map(h => (h || "").toString().toLowerCase().trim());
-  for (const c of candidates) {
-    const idx = norm.findIndex(x => x.includes(c));
-    if (idx >= 0) return idx;
-  }
-  return -1;
-}
-
-function detectHeaderRow(rows) {
-  const LIMIT = Math.min(rows.length, 30);
-  let bestIdx = 0, bestScore = -1;
-  for (let i = 0; i < LIMIT; i++) {
-    const row = rows[i];
-    const nonEmpty = row.filter(c => c !== null && c !== undefined && c !== "");
-    const textCells = nonEmpty.filter(c => typeof c === "string" && c.length < 60);
-    const score = textCells.length * 2 + nonEmpty.length;
-    const nextNonEmpty = (rows[i + 1] || []).filter(c => c !== null && c !== undefined && c !== "").length;
-    if (score > bestScore && nextNonEmpty >= 2) { bestScore = score; bestIdx = i; }
-  }
-  return bestIdx;
-}
-
 function matchToOrderItems(parsedRows, orderItems) {
-  const byCode     = new Map();
-  const byNameFull = new Map();
+  const byInternalCode  = new Map();
+  const bySupplierCode  = new Map();
+  const byNameFull      = new Map();
 
   orderItems.forEach(item => {
+    // Índice por código interno (EAN/barcode del catálogo)
     if (item.internal_product_code) {
       const k = item.internal_product_code.toString().toLowerCase().trim();
-      byCode.set(k, item);
-      // También indexar por valor numérico puro (maneja diferencias de formato en EAN/barcode)
-      const numK = parseInt(k);
-      if (!isNaN(numK)) byCode.set(String(numK), item);
+      byInternalCode.set(k, item);
+      const numK = String(parseInt(k));
+      if (!isNaN(parseInt(k))) byInternalCode.set(numK, item);
+    }
+    // Índice por código del proveedor (el que el proveedor usa en sus documentos)
+    if (item.supplier_product_code) {
+      const k = item.supplier_product_code.toString().toLowerCase().trim();
+      bySupplierCode.set(k, item);
+      const numK = String(parseInt(k));
+      if (!isNaN(parseInt(k))) bySupplierCode.set(numK, item);
     }
     if (item.product_name) {
       byNameFull.set(item.product_name.toString().toLowerCase().trim(), item);
     }
   });
 
-  // usedIds evita asignar el mismo ítem del pedido a dos filas del archivo
   const usedIds = new Set();
 
   return parsedRows.map(row => {
     const rawCode = (row.product_code || "").toString().trim();
     const codeQ   = rawCode.toLowerCase();
+    const numQ    = String(parseInt(codeQ));
     const nameQ   = (row.product_name || "").toString().trim().toLowerCase();
     let matched = null, matchType = "none";
 
-    // 1. Coincidencia exacta de código
+    // 1. Código interno exacto
     if (codeQ) {
-      const candidate = byCode.get(codeQ);
-      if (candidate && !usedIds.has(candidate.id)) { matched = candidate; matchType = "code"; }
+      const c = byInternalCode.get(codeQ) ?? (!isNaN(parseInt(codeQ)) ? byInternalCode.get(numQ) : null);
+      if (c && !usedIds.has(c.id)) { matched = c; matchType = "code"; }
     }
-    // 2. Coincidencia numérica (resuelve variaciones de formato en barcode/EAN)
+    // 2. Código del proveedor exacto
     if (!matched && codeQ) {
-      const numQ = String(parseInt(codeQ));
-      if (!isNaN(parseInt(codeQ))) {
-        const candidate = byCode.get(numQ);
-        if (candidate && !usedIds.has(candidate.id)) { matched = candidate; matchType = "code"; }
-      }
+      const c = bySupplierCode.get(codeQ) ?? (!isNaN(parseInt(codeQ)) ? bySupplierCode.get(numQ) : null);
+      if (c && !usedIds.has(c.id)) { matched = c; matchType = "code"; }
     }
-    // 3. Coincidencia exacta de nombre
+    // 3. Nombre exacto
     if (!matched && nameQ) {
-      const candidate = byNameFull.get(nameQ);
-      if (candidate && !usedIds.has(candidate.id)) { matched = candidate; matchType = "name"; }
+      const c = byNameFull.get(nameQ);
+      if (c && !usedIds.has(c.id)) { matched = c; matchType = "name"; }
     }
-    // 4. Coincidencia parcial de nombre — SÓLO entre ítems no usados
+    // 4. Nombre parcial (primeros 15 chars)
     if (!matched && nameQ) {
       for (const [key, item] of byNameFull.entries()) {
         if (!usedIds.has(item.id) && (key.includes(nameQ.slice(0, 15)) || nameQ.includes(key.slice(0, 15)))) {
@@ -120,7 +101,7 @@ function matchToOrderItems(parsedRows, orderItems) {
 }
 
 export default function SupplierConfirmationImporter({ orderId, orderItems, onImported }) {
-  const [workbook,      setWorkbook]      = useState(null);
+  const [sheetsData,    setSheetsData]    = useState([]);   // hojas del archivo: [{ name, rows }]
   const [file,          setFile]          = useState(null);
   const [sheets,        setSheets]        = useState([]);
   const [selectedSheet, setSelectedSheet] = useState(null);
@@ -153,21 +134,21 @@ export default function SupplierConfirmationImporter({ orderId, orderItems, onIm
         setHeaderRowIdx(hIdx);
         applyHeaderRow(rows, hIdx);
         setSelectedSheet("PDF");
-        setWorkbook(null);
+        setSheetsData([]);
         setStep("map");
       } catch (err) {
         setError(`Error al leer el PDF: ${err.message}`);
       }
     } else {
-      // ── Excel / CSV path ──
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const wb = XLSX.read(evt.target.result, { type: "binary" });
-        setWorkbook(wb); setSheets(wb.SheetNames);
-        if (wb.SheetNames.length === 1) loadSheet(wb, wb.SheetNames[0]);
+      // ── Excel / CSV / ODS path ──
+      try {
+        const { sheets: sh } = await readSpreadsheetFile(f);
+        setSheetsData(sh); setSheets(sh.map(x => x.name));
+        if (sh.length === 1) loadSheet(sh, sh[0].name);
         else setStep("sheet");
-      };
-      reader.readAsBinaryString(f);
+      } catch (err) {
+        setError(`No se pudo leer el archivo: ${err.message}`);
+      }
     }
   };
 
@@ -183,10 +164,9 @@ export default function SupplierConfirmationImporter({ orderId, orderItems, onIm
     setColMap(map);
   };
 
-  const loadSheet = (wb, sheetName) => {
+  const loadSheet = (sheetsArr, sheetName) => {
     setSelectedSheet(sheetName);
-    const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    const rows = sheetsArr.find(x => x.name === sheetName)?.rows ?? [];
     if (rows.length < 2) { setError("La hoja no tiene filas de datos."); return; }
     setAllRows(rows);
     const hIdx = detectHeaderRow(rows);
@@ -202,9 +182,7 @@ export default function SupplierConfirmationImporter({ orderId, orderItems, onIm
   };
 
   const handlePreview = () => {
-    const rows = workbook?.Sheets?.[selectedSheet]
-      ? XLSX.utils.sheet_to_json(workbook.Sheets[selectedSheet], { header: 1, defval: "" })
-      : allRows;
+    const rows = allRows;
     const dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== ""));
     const parsed = dataRows.map(row => ({
       product_code: colMap.product_code !== NONE ? (row[colMap.product_code] || "").toString().trim() : "",
@@ -277,7 +255,7 @@ export default function SupplierConfirmationImporter({ orderId, orderItems, onIm
       </div>
       <div className="grid gap-2">
         {sheets.map(s => (
-          <button key={s} onClick={() => loadSheet(workbook, s)}
+          <button key={s} onClick={() => loadSheet(sheetsData, s)}
             className="flex items-center justify-between px-4 py-3 rounded-lg border border-border hover:border-primary hover:bg-primary/5 transition-colors text-left">
             <span className="text-sm font-medium flex items-center gap-2"><Layers size={13} className="text-muted-foreground" />{s}</span>
             <ArrowRight size={13} className="text-muted-foreground" />
@@ -376,11 +354,15 @@ export default function SupplierConfirmationImporter({ orderId, orderItems, onIm
       fuzzy: { label: "Parcial", cls: "bg-yellow-100 text-yellow-700" },
     };
 
+    const exactMatch  = matched.filter(r => (r.confirmedQty ?? 0) === (r.orderItem?.final_qty ?? 0));
+    const withDiff    = matched.filter(r => (r.confirmedQty ?? 0) !== (r.orderItem?.final_qty ?? 0));
+
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3 flex-wrap">
-          <Badge className="bg-success/10 text-success border-success/20 text-xs">{matched.length} coincidencias</Badge>
-          {unmatched.length > 0 && <Badge variant="outline" className="text-warning border-warning text-xs">{unmatched.length} sin coincidencia</Badge>}
+          <Badge className="bg-success/10 text-success border-success/20 text-xs">{exactMatch.length} sin diferencia</Badge>
+          {withDiff.length > 0 && <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs">{withDiff.length} con diferencia</Badge>}
+          {unmatched.length > 0 && <Badge variant="outline" className="text-warning border-warning text-xs">{unmatched.length} sin emparejar</Badge>}
         </div>
 
         <div className="overflow-auto max-h-80 border border-border rounded-lg">

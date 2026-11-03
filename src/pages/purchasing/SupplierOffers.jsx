@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import { base44 } from "@/api/base44Client";
+import { useAuth } from "@/lib/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -36,18 +37,16 @@ export default function SupplierOffers() {
   const [parsedRows, setParsedRows] = useState([]);
   const [fileError, setFileError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [user, setUser] = useState(null);
 
-  React.useEffect(() => { base44.auth.me().then(setUser).catch(() => {}); }, []);
-
-  const isAdmin = user && !["comercial"].includes(user.role);
+  const { user: authUser, userProfile } = useAuth();
+  const isAdmin = userProfile && !["comercial"].includes(userProfile.role);
 
   const { data: offers = [], isLoading } = useQuery({
-    queryKey: ["supplier-offers", user?.email],
+    queryKey: ["supplier-offers", authUser?.email],
     queryFn: () => isAdmin
       ? base44.entities.SupplierOffer.list("-created_date", 200)
-      : base44.entities.SupplierOffer.filter({ imported_by: user.email }, "-created_date", 200),
-    enabled: !!user,
+      : base44.entities.SupplierOffer.filter({ imported_by: authUser?.email }, "-created_date", 200),
+    enabled: !!authUser && !!userProfile,
   });
 
   const handleFile = (e) => {
@@ -77,7 +76,7 @@ export default function SupplierOffers() {
     const offer = await base44.entities.SupplierOffer.create({
       ...form,
       exchange_rate: parseFloat(form.exchange_rate) || 1,
-      imported_by: user.email,
+      imported_by: authUser?.email,
       status: "importada",
       total_rows: parsedRows.length,
       valid_rows: parsedRows.length,
@@ -86,7 +85,7 @@ export default function SupplierOffers() {
 
     const items = parsedRows.map((r, i) => ({
       offer_id: offer.id,
-      imported_by: user.email,
+      imported_by: authUser?.email,
       supplier_product_code: String(r["Código"] || r["codigo"] || r["SKU"] || r["code"] || ""),
       supplier_product_name: String(r["Nombre"] || r["nombre"] || r["name"] || r["Producto"] || r["producto"] || "Sin nombre"),
       supplier_description: String(r["Descripción"] || r["descripcion"] || r["description"] || ""),

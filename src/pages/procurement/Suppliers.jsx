@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
@@ -9,11 +9,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import SearchSelect from "@/components/common/SearchSelect";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Plus, Search, Edit2, Trash2, Building2, Phone, Mail, Globe,
-  ToggleLeft, ToggleRight, X, ChevronDown,
+  ToggleLeft, ToggleRight, X, ChevronDown, FileText, CalendarDays,
+  History, AlertTriangle, Filter, PhoneCall,
 } from "lucide-react";
+import { format, parseISO, differenceInDays } from "date-fns";
+import { es } from "date-fns/locale";
 import { useProcurementUser } from "@/hooks/useProcurementUser";
 
 // ── Constantes ───────────────────────────────────────────────────────────────
@@ -135,15 +139,18 @@ const EMPTY_FORM = {
   supplier_type: "",
   comercializacion_type: "",
   country: "",
+  address: "",
   email: "",
-  phone: "",
+  comercial: "",
   default_currency: "USD",
   default_exchange_rate: 1,
-  address: "",
-  contacts: [""],
+  contacts: [{ name: "", cargo: "", telefono: "" }],
   productos_global: [],
   productos_especificos: [],
   is_active: true,
+  has_contract: false,
+  contract_notes: "",
+  next_contact_date: "",
 };
 
 // ── Componente MultiSelect con búsqueda ──────────────────────────────────────
@@ -226,31 +233,108 @@ function ProductoMultiSelect({ label, options, value, onChange }) {
 // ── Página principal ─────────────────────────────────────────────────────────
 
 export default function Suppliers() {
-  const { isAdmin } = useProcurementUser();
+  const { isAdmin, isComercial, isAnalista, isRevisor, user } = useProcurementUser();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const canManageContacts = isAdmin || isComercial || isAnalista || isRevisor;
 
   const [search, setSearch]           = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [showForm, setShowForm]       = useState(false);
   const [editing, setEditing]         = useState(null);
   const [form, setForm]               = useState(EMPTY_FORM);
   const [saving, setSaving]           = useState(false);
   const [showDeleteId, setShowDeleteId] = useState(null);
+  const [markingContactId, setMarkingContactId] = useState(null);
 
   const { data: suppliers = [], isLoading } = useQuery({
     queryKey: ["suppliers"],
     queryFn:  () => base44.entities.Supplier.list("name", 500),
   });
 
+  const { data: allOrders = [] } = useQuery({
+    queryKey: ["purchase-orders-for-suppliers"],
+    queryFn:  () => base44.entities.PurchaseOrder.list("-created_date", 500),
+  });
+
+  const { data: supplierContacts = [] } = useQuery({
+    queryKey: ["supplier-contacts"],
+    queryFn:  () => base44.entities.SupplierContact.list("-contact_date", 2000),
+  });
+
+  const lastContactBySupplier = useMemo(() => {
+    const map = {};
+    supplierContacts.forEach(c => {
+      if (!c.supplier_id || !c.contact_date) return;
+      if (!map[c.supplier_id] || c.contact_date > map[c.supplier_id]) {
+        map[c.supplier_id] = c.contact_date;
+      }
+    });
+    return map;
+  }, [supplierContacts]);
+
+  const handleMarkContacted = async (s) => {
+    if (lastContactBySupplier[s.id] === today) {
+      toast({ title: "Ya contactado hoy", description: `${s.name} ya fue marcado como contactado hoy.` });
+      return;
+    }
+    setMarkingContactId(s.id);
+    try {
+      await base44.entities.SupplierContact.create({
+        supplier_id:   s.id,
+        supplier_name: s.name,
+        contact_date:  today,
+        contacted_by:  user?.email,
+      });
+      queryClient.invalidateQueries({ queryKey: ["supplier-contacts"] });
+      toast({ title: "Contacto registrado", description: `${s.name} marcado como contactado hoy.` });
+    } catch (err) {
+      toast({ title: "Error al registrar contacto", description: err?.message, variant: "destructive" });
+    } finally {
+      setMarkingContactId(null);
+    }
+  };
+
+  const orderStatsBySupplier = useMemo(() => {
+    const map = {};
+    const currentYear = new Date().getFullYear().toString();
+    allOrders.forEach(ord => {
+      const name = ord.supplier_name;
+      if (!name) return;
+      if (!map[name]) map[name] = { total: 0, thisYear: 0, lastDate: null, totalAmount: 0 };
+      map[name].total += 1;
+      if ((ord.created_date || "").startsWith(currentYear)) map[name].thisYear += 1;
+      if (ord.total_amount) map[name].totalAmount += ord.total_amount;
+      if (!map[name].lastDate || (ord.created_date || "") > map[name].lastDate) {
+        map[name].lastDate = ord.created_date;
+      }
+    });
+    return map;
+  }, [allOrders]);
+
+  const today = new Date().toISOString().slice(0, 10);
+
   const filtered = suppliers.filter(s => {
     const q = search.toLowerCase();
-    return !q ||
+    const matchSearch = !q ||
       (s.name || "").toLowerCase().includes(q) ||
       (s.code || "").toLowerCase().includes(q) ||
       (s.contact_name || "").toLowerCase().includes(q) ||
+      (s.comercial || "").toLowerCase().includes(q) ||
       (s.supplier_type || "").toLowerCase().includes(q) ||
       (s.country || "").toLowerCase().includes(q);
+    const matchCategory = !categoryFilter ||
+      (s.productos_global || []).includes(categoryFilter) ||
+      (s.productos_especificos || []).includes(categoryFilter);
+    return matchSearch && matchCategory;
   });
+
+  // Proveedores con contacto próximo (próximos 14 días)
+  const upcomingContacts = suppliers.filter(s => {
+    if (!s.next_contact_date) return false;
+    const diff = differenceInDays(parseISO(s.next_contact_date), new Date());
+    return diff >= 0 && diff <= 14;
+  }).sort((a, b) => (a.next_contact_date || "").localeCompare(b.next_contact_date || ""));
 
   const openCreate = () => {
     setEditing(null);
@@ -260,30 +344,32 @@ export default function Suppliers() {
 
   const openEdit = (s) => {
     setEditing(s);
-    // Reconstruye el array de contactos, manteniendo siempre el slot 0
-    const contacts = [
-      s.contact_name || "",
-      s.contact_2    || "",
-      s.contact_3    || "",
-      s.contact_4    || "",
-      s.contact_5    || "",
-    ].filter((c, i) => i === 0 || c !== "");
-
+    const raw = [
+      { name: s.contact_name || "", cargo: s.cargo_1 || "", telefono: s.telefono_1 || "" },
+      { name: s.contact_2    || "", cargo: s.cargo_2 || "", telefono: s.telefono_2 || "" },
+      { name: s.contact_3    || "", cargo: s.cargo_3 || "", telefono: s.telefono_3 || "" },
+      { name: s.contact_4    || "", cargo: s.cargo_4 || "", telefono: s.telefono_4 || "" },
+      { name: s.contact_5    || "", cargo: s.cargo_5 || "", telefono: s.telefono_5 || "" },
+    ];
+    const contacts = raw.filter((c, i) => i === 0 || c.name || c.cargo || c.telefono);
     setForm({
       name:                  s.name || "",
       code:                  s.code || "",
       supplier_type:         s.supplier_type || "",
       comercializacion_type: s.comercializacion_type || "",
       country:               s.country || "",
+      address:               s.address || "",
       email:                 s.email || "",
-      phone:                 s.phone || "",
+      comercial:             s.comercial || "",
       default_currency:      s.default_currency || "USD",
       default_exchange_rate: s.default_exchange_rate || 1,
-      address:               s.address || "",
-      contacts:              contacts.length > 0 ? contacts : [""],
+      contacts:              contacts.length > 0 ? contacts : [{ name: "", cargo: "", telefono: "" }],
       productos_global:      s.productos_global || [],
       productos_especificos: s.productos_especificos || [],
       is_active:             s.is_active !== false,
+      has_contract:          s.has_contract || false,
+      contract_notes:        s.contract_notes || "",
+      next_contact_date:     s.next_contact_date || "",
     });
     setShowForm(true);
   };
@@ -293,31 +379,49 @@ export default function Suppliers() {
       toast({ title: "El nombre del proveedor es obligatorio", variant: "destructive" });
       return;
     }
+    if (form.next_contact_date && form.next_contact_date < today) {
+      toast({ title: "Fecha inválida", description: "El próximo contacto no puede ser una fecha anterior a hoy.", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       const payload = { name: form.name.trim() };
-      if (form.code)                 payload.code = form.code.trim().toUpperCase();
-      if (form.supplier_type)        payload.supplier_type = form.supplier_type;
+      if (form.code)                  payload.code = form.code.trim().toUpperCase();
+      if (form.supplier_type)         payload.supplier_type = form.supplier_type;
       if (form.comercializacion_type) payload.comercializacion_type = form.comercializacion_type;
-      if (form.country)              payload.country = form.country;
-      if (form.email)                payload.email = form.email;
-      if (form.phone)                payload.phone = form.phone;
-      if (form.address)              payload.address = form.address;
-      if (form.default_currency)     payload.default_currency = form.default_currency;
+      if (form.country)               payload.country = form.country;
+      if (form.address)               payload.address = form.address;
+      if (form.email)                 payload.email = form.email;
+      if (form.comercial)             payload.comercial = form.comercial;
+      if (form.default_currency)      payload.default_currency = form.default_currency;
       const exRate = parseFloat(form.default_exchange_rate);
-      if (!isNaN(exRate))            payload.default_exchange_rate = exRate;
+      if (!isNaN(exRate))             payload.default_exchange_rate = exRate;
 
-      // Contactos: mapea el array a columnas individuales
-      const [c1, c2, c3, c4, c5] = form.contacts;
-      payload.contact_name = c1 || "";
-      payload.contact_2    = c2 || null;
-      payload.contact_3    = c3 || null;
-      payload.contact_4    = c4 || null;
-      payload.contact_5    = c5 || null;
+      // Contactos: mapea array de objetos a columnas individuales
+      const slots = [...form.contacts, {},{},{},{},{}].slice(0, 5);
+      payload.contact_name = slots[0]?.name || "";
+      payload.cargo_1      = slots[0]?.cargo    || null;
+      payload.telefono_1   = slots[0]?.telefono || null;
+      payload.contact_2    = slots[1]?.name    || null;
+      payload.cargo_2      = slots[1]?.cargo    || null;
+      payload.telefono_2   = slots[1]?.telefono || null;
+      payload.contact_3    = slots[2]?.name    || null;
+      payload.cargo_3      = slots[2]?.cargo    || null;
+      payload.telefono_3   = slots[2]?.telefono || null;
+      payload.contact_4    = slots[3]?.name    || null;
+      payload.cargo_4      = slots[3]?.cargo    || null;
+      payload.telefono_4   = slots[3]?.telefono || null;
+      payload.contact_5    = slots[4]?.name    || null;
+      payload.cargo_5      = slots[4]?.cargo    || null;
+      payload.telefono_5   = slots[4]?.telefono || null;
 
       // Arrays (siempre se envían para soportar limpiar selecciones en update)
       payload.productos_global      = form.productos_global;
       payload.productos_especificos = form.productos_especificos;
+
+      payload.has_contract      = form.has_contract;
+      payload.contract_notes    = form.contract_notes || null;
+      payload.next_contact_date = form.next_contact_date || null;
 
       if (editing || !form.is_active) payload.is_active = form.is_active;
 
@@ -353,7 +457,7 @@ export default function Suppliers() {
   const sf = field => e => setForm(p => ({ ...p, [field]: e.target.value }));
 
   return (
-    <div className="p-4 md:p-6 space-y-4 max-w-[1200px] mx-auto">
+    <div className="p-4 md:p-6 space-y-4 max-w-[1400px] mx-auto">
 
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
@@ -373,15 +477,70 @@ export default function Suppliers() {
         )}
       </div>
 
-      {/* Búsqueda */}
-      <div className="relative max-w-sm">
-        <Search size={14} className="absolute left-2.5 top-2.5 text-muted-foreground" />
-        <Input
-          placeholder="Buscar por nombre, ID, país..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-8 h-9"
-        />
+      {/* Mini stats */}
+      {suppliers.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: "Total",    value: suppliers.length,                              cls: "text-foreground" },
+            { label: "Activos",  value: suppliers.filter(s => s.is_active !== false).length, cls: "text-success" },
+            { label: "Inactivos",value: suppliers.filter(s => s.is_active === false).length, cls: "text-muted-foreground" },
+          ].map(({ label, value, cls }) => (
+            <div key={label} className="flex items-center gap-1.5 bg-muted/60 border border-border/50 rounded-lg px-3 py-1.5 text-xs">
+              <span className={`font-bold text-sm ${cls}`}>{value}</span>
+              <span className="text-muted-foreground">{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Plan de Contacto — próximos 14 días */}
+      {upcomingContacts.length > 0 && (
+        <Card className="p-4 border-warning/40 bg-warning/5">
+          <h3 className="text-sm font-semibold flex items-center gap-2 mb-3 text-warning">
+            <CalendarDays size={14} /> Plan de Contacto — Próximos 14 días
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {upcomingContacts.map(s => {
+              const diff = differenceInDays(parseISO(s.next_contact_date), new Date());
+              const urgent = diff <= 2;
+              return (
+                <div key={s.id} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs border ${urgent ? "bg-destructive/10 border-destructive/30" : "bg-muted/60 border-border/50"}`}>
+                  {urgent && <AlertTriangle size={11} className="text-destructive flex-shrink-0" />}
+                  <div>
+                    <p className="font-semibold">{s.name}</p>
+                    <p className={`text-[10px] ${urgent ? "text-destructive" : "text-muted-foreground"}`}>
+                      {diff === 0 ? "Hoy" : diff === 1 ? "Mañana" : `En ${diff} días`}
+                      {" · "}{format(parseISO(s.next_contact_date), "dd MMM", { locale: es })}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Búsqueda + Filtro de categoría */}
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={14} className="absolute left-2.5 top-2.5 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por nombre, ID, país..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-8 h-9"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Filter size={14} className="shrink-0 text-muted-foreground" />
+          <SearchSelect
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            options={PRODUCTOS_GLOBAL}
+            allValue="" allLabel="Todos los productos"
+            placeholder="Filtrar por producto…" size="md" className="w-[230px]"
+          />
+        </div>
       </div>
 
       {/* Lista */}
@@ -408,12 +567,23 @@ export default function Suppliers() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {filtered.map(s => {
-            const allContacts = [s.contact_name, s.contact_2, s.contact_3, s.contact_4, s.contact_5].filter(Boolean);
+            const allContacts = [
+              { name: s.contact_name, cargo: s.cargo_1, telefono: s.telefono_1 },
+              { name: s.contact_2,    cargo: s.cargo_2, telefono: s.telefono_2 },
+              { name: s.contact_3,    cargo: s.cargo_3, telefono: s.telefono_3 },
+              { name: s.contact_4,    cargo: s.cargo_4, telefono: s.telefono_4 },
+              { name: s.contact_5,    cargo: s.cargo_5, telefono: s.telefono_5 },
+            ].filter(c => c.name || c.telefono);
+            const stats = orderStatsBySupplier[s.name];
+            const nextContactDiff = s.next_contact_date
+              ? differenceInDays(parseISO(s.next_contact_date), new Date())
+              : null;
+            const contactUrgent = nextContactDiff !== null && nextContactDiff <= 2;
             return (
               <Card key={s.id} className={`p-4 ${!s.is_active ? "opacity-60" : ""}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0 space-y-2">
-                    {/* ID + Nombre + Estado */}
+                    {/* ID + Nombre + Estado + Contrato */}
                     <div className="flex items-center gap-2 flex-wrap">
                       {s.code && (
                         <Badge variant="outline" className="text-[10px] font-mono font-bold border-primary/40 text-primary bg-primary/5 tracking-wide">
@@ -424,9 +594,12 @@ export default function Suppliers() {
                       <Badge variant={s.is_active ? "default" : "outline"} className="text-[10px]">
                         {s.is_active ? "Activo" : "Inactivo"}
                       </Badge>
+                      <Badge variant="outline" className={`text-[10px] flex items-center gap-1 ${s.has_contract ? "text-success border-success/40 bg-success/5" : "text-muted-foreground"}`}>
+                        <FileText size={9} /> {s.has_contract ? "Con contrato" : "Sin contrato"}
+                      </Badge>
                     </div>
 
-                    {/* Tipo proveedor + Comercialización + País */}
+                    {/* Tipo proveedor + Comercialización + País + Comercial */}
                     <div className="flex flex-wrap gap-1.5 items-center">
                       {s.supplier_type && (
                         <Badge variant="secondary" className="text-[10px]">{s.supplier_type}</Badge>
@@ -439,21 +612,24 @@ export default function Suppliers() {
                           <Globe size={10} /> {s.country}
                         </span>
                       )}
+                      {s.comercial && (
+                        <span className="text-xs text-muted-foreground">· {s.comercial}</span>
+                      )}
                     </div>
 
-                    {/* Contacto + Email + Teléfono + Moneda */}
+                    {/* Contactos + Email + Moneda */}
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                       {allContacts.length > 0 && (
-                        <span>
-                          {allContacts[0]}
+                        <span className="flex items-center gap-1">
+                          <Phone size={10} />
+                          {allContacts[0].name}
+                          {allContacts[0].cargo && <span className="opacity-70">({allContacts[0].cargo})</span>}
+                          {allContacts[0].telefono && <span className="font-mono">{allContacts[0].telefono}</span>}
                           {allContacts.length > 1 && <span className="ml-1 text-[10px]">+{allContacts.length - 1} más</span>}
                         </span>
                       )}
                       {s.email && (
                         <span className="flex items-center gap-1"><Mail size={10} /> {s.email}</span>
-                      )}
-                      {s.phone && (
-                        <span className="flex items-center gap-1"><Phone size={10} /> {s.phone}</span>
                       )}
                       {s.default_currency && (
                         <span>
@@ -464,17 +640,74 @@ export default function Suppliers() {
                       )}
                     </div>
 
+                    {/* Historial de operaciones */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+                      <span className="flex items-center gap-1 text-muted-foreground">
+                        <History size={10} />
+                        {stats ? (
+                          <>
+                            <span className="font-semibold text-foreground">{stats.total}</span> pedido(s) histórico
+                            {stats.thisYear > 0 && <span className="ml-1">· <span className="font-semibold text-primary">{stats.thisYear}</span> este año</span>}
+                          </>
+                        ) : "Sin pedidos registrados"}
+                      </span>
+                      {stats?.lastDate && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <CalendarDays size={10} />
+                          Último pedido: <span className="font-medium text-foreground ml-0.5">
+                            {format(parseISO(stats.lastDate), "dd MMM yyyy", { locale: es })}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Próximo contacto + Último contacto + Marcar contactado */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {s.next_contact_date && (
+                        <div className={`flex items-center gap-1.5 text-xs rounded px-2 py-1 w-fit ${contactUrgent ? "bg-destructive/10 text-destructive" : nextContactDiff !== null && nextContactDiff <= 7 ? "bg-warning/10 text-warning" : "bg-muted/60 text-muted-foreground"}`}>
+                          {contactUrgent && <AlertTriangle size={10} />}
+                          <CalendarDays size={10} />
+                          <span>Contactar: <strong>{format(parseISO(s.next_contact_date), "dd MMM yyyy", { locale: es })}</strong></span>
+                          {nextContactDiff !== null && (
+                            <span className="opacity-70">
+                              ({nextContactDiff === 0 ? "hoy" : nextContactDiff < 0 ? `hace ${Math.abs(nextContactDiff)}d` : `en ${nextContactDiff}d`})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {lastContactBySupplier[s.id] && (
+                        <div className="flex items-center gap-1.5 text-xs rounded px-2 py-1 w-fit bg-success/10 text-success">
+                          <History size={10} />
+                          <span>Último contacto: <strong>{format(parseISO(lastContactBySupplier[s.id]), "dd MMM yyyy", { locale: es })}</strong></span>
+                        </div>
+                      )}
+                      {canManageContacts && (() => {
+                        const contactadoHoy = lastContactBySupplier[s.id] === today;
+                        return (
+                          <Button
+                            variant="outline" size="sm"
+                            className={`h-6 text-[11px] px-2 ${contactadoHoy ? "text-success border-success/40 bg-success/5 cursor-default" : ""}`}
+                            disabled={markingContactId === s.id || contactadoHoy}
+                            onClick={() => handleMarkContacted(s)}
+                          >
+                            <PhoneCall size={10} className="mr-1" />
+                            {markingContactId === s.id ? "Guardando..." : contactadoHoy ? "Ya contactado hoy" : "Marcar contactado hoy"}
+                          </Button>
+                        );
+                      })()}
+                    </div>
+
                     {/* Productos Global (primeros 3 + contador) */}
                     {s.productos_global?.length > 0 && (
                       <div className="flex flex-wrap gap-1">
-                        {s.productos_global.slice(0, 3).map(p => (
-                          <Badge key={p} variant="outline" className="text-[10px] bg-primary/5 border-primary/20 text-primary">
+                        {s.productos_global.slice(0, 4).map(p => (
+                          <Badge key={p} variant="outline" className={`text-[10px] ${categoryFilter === p ? "bg-primary/15 border-primary/40 text-primary" : "bg-primary/5 border-primary/20 text-primary"}`}>
                             {p}
                           </Badge>
                         ))}
-                        {s.productos_global.length > 3 && (
+                        {s.productos_global.length > 4 && (
                           <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                            +{s.productos_global.length - 3}
+                            +{s.productos_global.length - 4}
                           </Badge>
                         )}
                       </div>
@@ -591,46 +824,65 @@ export default function Suppliers() {
               </div>
             </div>
 
-            {/* Email + Teléfono */}
+            {/* Comercial interno + Email */}
             <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Comercial (interno)</Label>
+                <Input placeholder="Quién gestiona este proveedor" value={form.comercial} onChange={sf("comercial")} className="h-9" />
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
                 <Input type="email" placeholder="contacto@empresa.com" value={form.email} onChange={sf("email")} className="h-9" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Teléfono</Label>
-                <Input placeholder="+1 555 000 0000" value={form.phone} onChange={sf("phone")} className="h-9" />
               </div>
             </div>
 
             {/* Dirección */}
             <div className="space-y-1">
               <Label className="text-xs">Dirección</Label>
-              <Input placeholder="Dirección física del proveedor" value={form.address} onChange={sf("address")} className="h-9" />
+              <Input placeholder="Dirección del proveedor" value={form.address} onChange={sf("address")} className="h-9" />
             </div>
 
-            {/* Contactos dinámicos */}
+            {/* Contactos dinámicos (nombre + cargo + teléfono) */}
             <div className="space-y-2">
-              <Label className="text-xs">Contactos</Label>
+              <Label className="text-xs">Contactos del proveedor</Label>
               {form.contacts.map((contact, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground w-[72px] shrink-0 text-right">
+                <div key={idx} className="flex items-start gap-2">
+                  <span className="text-xs text-muted-foreground w-[68px] shrink-0 text-right mt-2.5">
                     Contacto {idx + 1}
                   </span>
-                  <Input
-                    placeholder={idx === 0 ? "Nombre del contacto principal" : `Nombre del contacto ${idx + 1}`}
-                    value={contact}
-                    onChange={e => {
-                      const next = [...form.contacts];
-                      next[idx] = e.target.value;
-                      setForm(p => ({ ...p, contacts: next }));
-                    }}
-                    className="h-9 flex-1"
-                  />
+                  <div className="flex-1 grid grid-cols-3 gap-2">
+                    <Input
+                      placeholder="Nombre"
+                      value={contact.name}
+                      onChange={e => {
+                        const next = form.contacts.map((c, i) => i === idx ? { ...c, name: e.target.value } : c);
+                        setForm(p => ({ ...p, contacts: next }));
+                      }}
+                      className="h-9 text-sm"
+                    />
+                    <Input
+                      placeholder="Cargo"
+                      value={contact.cargo}
+                      onChange={e => {
+                        const next = form.contacts.map((c, i) => i === idx ? { ...c, cargo: e.target.value } : c);
+                        setForm(p => ({ ...p, contacts: next }));
+                      }}
+                      className="h-9 text-sm"
+                    />
+                    <Input
+                      placeholder="Teléfono"
+                      value={contact.telefono}
+                      onChange={e => {
+                        const next = form.contacts.map((c, i) => i === idx ? { ...c, telefono: e.target.value } : c);
+                        setForm(p => ({ ...p, contacts: next }));
+                      }}
+                      className="h-9 text-sm"
+                    />
+                  </div>
                   {idx > 0 && (
                     <Button
                       type="button" variant="ghost" size="sm"
-                      className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                      className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive shrink-0 mt-0"
                       onClick={() => setForm(p => ({ ...p, contacts: p.contacts.filter((_, i) => i !== idx) }))}
                     >
                       <X size={14} />
@@ -640,8 +892,8 @@ export default function Suppliers() {
               ))}
               {form.contacts.length < 5 && (
                 <Button
-                  type="button" variant="outline" size="sm" className="h-8 text-xs ml-[88px]"
-                  onClick={() => setForm(p => ({ ...p, contacts: [...p.contacts, ""] }))}
+                  type="button" variant="outline" size="sm" className="h-8 text-xs ml-[80px]"
+                  onClick={() => setForm(p => ({ ...p, contacts: [...p.contacts, { name: "", cargo: "", telefono: "" }] }))}
                 >
                   <Plus size={12} className="mr-1" /> Agregar contacto
                 </Button>
@@ -664,14 +916,53 @@ export default function Suppliers() {
               onChange={v => setForm(p => ({ ...p, productos_especificos: v }))}
             />
 
-            {/* Activo */}
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="is_active"
-                checked={form.is_active}
-                onCheckedChange={checked => setForm(p => ({ ...p, is_active: !!checked }))}
-              />
-              <Label htmlFor="is_active" className="text-xs cursor-pointer">Proveedor activo</Label>
+            {/* Contrato + Próximo contacto */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Próximo contacto previsto</Label>
+                <Input
+                  type="date"
+                  value={form.next_contact_date}
+                  onChange={sf("next_contact_date")}
+                  min={today}
+                  className="h-9"
+                />
+                {form.next_contact_date && form.next_contact_date < today && (
+                  <p className="text-[10px] text-destructive">La fecha no puede ser anterior a hoy</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Notas del contrato</Label>
+                <Input
+                  placeholder="Ej: Vence dic 2026, condiciones especiales..."
+                  value={form.contract_notes}
+                  onChange={sf("contract_notes")}
+                  className="h-9"
+                  disabled={!form.has_contract}
+                />
+              </div>
+            </div>
+
+            {/* Activo + Contrato */}
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="is_active"
+                  checked={form.is_active}
+                  onCheckedChange={checked => setForm(p => ({ ...p, is_active: !!checked }))}
+                />
+                <Label htmlFor="is_active" className="text-xs cursor-pointer">Proveedor activo</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="has_contract"
+                  checked={form.has_contract}
+                  onCheckedChange={checked => setForm(p => ({ ...p, has_contract: !!checked }))}
+                />
+                <Label htmlFor="has_contract" className="text-xs cursor-pointer flex items-center gap-1">
+                  <FileText size={11} /> Tiene contrato
+                </Label>
+              </div>
             </div>
 
             {/* Acciones */}

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { finalizePurchaseOrder } from "@/api/reabApiClient";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
@@ -93,15 +94,20 @@ export default function ReplenishmentProposal() {
     }
     setGenerating(true);
 
+    // Count how many internal products share each offer_item_id (for pack detection)
+    const matchesPerItem = {};
+    matches.forEach(m => { matchesPerItem[m.offer_item_id] = (matchesPerItem[m.offer_item_id] || 0) + 1; });
+
     const newLines = matches.map(match => {
-      const offerItem = itemMap[match.offer_item_id];
+      const offerItem     = itemMap[match.offer_item_id];
       const internalOffer = internalOfferMap[match.internal_product_id];
 
       const currentStock = internalOffer?.existencia_fisica || 0;
       const minimumStock = internalOffer?.store_min_kontrol || 0;
-      const idealStock = Math.max(minimumStock * 2, minimumStock + 10);
-      const need = Math.max(0, idealStock - currentStock);
-      const suggested = offerItem ? roundToMultiple(Math.max(need, offerItem.min_qty || 1), offerItem.pack_multiple || 1) : need;
+      const idealStock   = Math.max(minimumStock * 2, minimumStock + 10);
+      const need         = Math.max(0, idealStock - currentStock);
+      const suggested    = offerItem ? roundToMultiple(Math.max(need, offerItem.min_qty || 1), offerItem.pack_multiple || 1) : need;
+      const isPackItem   = (matchesPerItem[match.offer_item_id] || 1) > 1;
 
       return {
         offer_id: offerId,
@@ -111,6 +117,9 @@ export default function ReplenishmentProposal() {
         internal_product_id: match.internal_product_id,
         internal_product_codigo: match.internal_product_codigo,
         internal_product_nombre: match.internal_product_nombre,
+        supplier_product_code: offerItem?.supplier_product_code || null,
+        supplier_product_name: offerItem?.supplier_product_name || null,
+        is_pack_item: isPackItem,
         current_stock: currentStock,
         minimum_stock: minimumStock,
         ideal_stock: idealStock,
@@ -215,16 +224,22 @@ export default function ReplenishmentProposal() {
         purchase_order_id: po.id,
         offer_item_id: l.offer_item_id,
         internal_product_id: l.internal_product_id,
-        internal_product_codigo: l.internal_product_codigo,
-        internal_product_nombre: l.internal_product_nombre,
+        internal_product_code: l.internal_product_codigo,
+        product_name: l.internal_product_nombre || l.supplier_product_name || l.supplier_product_code || "Producto",
+        supplier_product_code: l.supplier_product_code || null,
+        supplier_product_name: l.supplier_product_name || null,
         unit_cost: l.offered_cost || 0,
         currency: l.currency,
-        ordered_qty: l.final_qty,
-        subtotal: l.final_qty * (l.offered_cost || 0),
+        final_qty: l.final_qty,
         suggested_qty: l.suggested_qty,
-        created_by: user?.email,
+        current_stock: l.current_stock,
+        min_qty: l.min_qty,
+        pack_multiple: l.pack_multiple,
+        status: "included",
       }))
     );
+
+    await finalizePurchaseOrder(po.id, "borrador");
 
     // Update proposal items status
     for (const l of selectedLines) {
@@ -293,6 +308,7 @@ export default function ReplenishmentProposal() {
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Producto</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Cód. Proveedor</th>
                   <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Stock</th>
                   <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Mín</th>
                   <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Ideal</th>
@@ -311,10 +327,20 @@ export default function ReplenishmentProposal() {
                   const isDiscarded = line.selection_status === "descartado";
                   const subtotal = line.final_qty * (line.offered_cost || 0);
                   return (
-                    <tr key={idx} className={`border-t border-border ${isDiscarded ? "opacity-40" : ""}`}>
+                    <tr key={idx} className={`border-t border-border ${isDiscarded ? "opacity-40" : ""} ${line.is_pack_item ? "bg-blue-50/30 dark:bg-blue-900/10" : ""}`}>
                       <td className="px-3 py-2">
-                        <div className="font-medium">{line.internal_product_codigo}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium">{line.internal_product_codigo}</span>
+                          {line.is_pack_item && (
+                            <span className="text-[9px] bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400 px-1 py-0.5 rounded font-medium flex-shrink-0">PACK</span>
+                          )}
+                        </div>
                         <div className="text-muted-foreground truncate max-w-[160px]">{line.internal_product_nombre}</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        {line.supplier_product_code
+                          ? <span className="font-mono text-xs text-muted-foreground">{line.supplier_product_code}</span>
+                          : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-3 py-2 text-right">{line.current_stock}</td>
                       <td className="px-3 py-2 text-right text-muted-foreground">{line.minimum_stock}</td>

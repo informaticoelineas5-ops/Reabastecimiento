@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { finalizePurchaseOrder } from "@/api/reabApiClient";
 import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,8 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
         final_qty:             i.final_qty ?? 0,
         unit_cost:             i.unit_cost ?? 0,
         status:                i.status || "included",
+        pack_multiple:         i.pack_multiple ?? 1,
+        min_qty:               i.min_qty ?? 1,
       })));
     }
   }, [items]);
@@ -69,6 +72,8 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
         status:                it.status,
       })
     ));
+
+    await finalizePurchaseOrder(order.id);
 
     queryClient.invalidateQueries({ queryKey: ["purchase-order", order.id] });
     queryClient.invalidateQueries({ queryKey: ["purchase-order-items", order.id] });
@@ -117,7 +122,13 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
                 </thead>
                 <tbody>
                   {itemForms.map((it, idx) => {
-                    const subtotal = (parseFloat(it.final_qty) || 0) * (parseFloat(it.unit_cost) || 0);
+                    const subtotal     = (parseFloat(it.final_qty) || 0) * (parseFloat(it.unit_cost) || 0);
+                    const packMultiple = it.pack_multiple ?? 1;
+                    const minQty       = it.min_qty ?? 1;
+                    const qty          = parseFloat(it.final_qty) || 0;
+                    const multWarn     = packMultiple > 1 && qty > 0 && qty % packMultiple !== 0;
+                    const minWarn      = qty > 0 && qty < minQty;
+                    const hasWarn      = multWarn || minWarn;
                     return (
                       <tr key={it.id} className={`border-b border-border/50 ${it.status === "excluded" ? "opacity-50 bg-muted/20" : idx % 2 === 0 ? "" : "bg-muted/10"}`}>
                         <td className="px-2 py-1.5">
@@ -127,7 +138,18 @@ export default function EditOrderDialog({ open, onClose, order, items }) {
                           <Input value={it.product_name} onChange={e => updateItem(it.id, "product_name", e.target.value)} className="h-6 text-xs min-w-[160px]" />
                         </td>
                         <td className="px-2 py-1.5">
-                          <Input type="number" value={it.final_qty} onChange={e => updateItem(it.id, "final_qty", e.target.value)} className="h-6 text-xs w-20 text-center" />
+                          <div className="flex flex-col gap-0.5">
+                            <Input
+                              type="number"
+                              min={0}
+                              step={packMultiple > 1 ? packMultiple : 1}
+                              value={it.final_qty}
+                              onChange={e => updateItem(it.id, "final_qty", e.target.value)}
+                              className={`h-6 text-xs w-20 text-center ${hasWarn ? "border-orange-400 focus-visible:ring-orange-400" : ""}`}
+                            />
+                            {multWarn && <span className="text-orange-500 text-[10px] whitespace-nowrap">Múlt: {packMultiple}</span>}
+                            {minWarn  && <span className="text-orange-500 text-[10px] whitespace-nowrap">Mín: {minQty}</span>}
+                          </div>
                         </td>
                         <td className="px-2 py-1.5">
                           <Input type="number" value={it.unit_cost} onChange={e => updateItem(it.id, "unit_cost", e.target.value)} className="h-6 text-xs w-24" />
