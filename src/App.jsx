@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
 import { pagesConfig } from './pages.config'
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { HashRouter as Router, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import ImportConfig from './pages/ImportConfig';
 import ProcurementDashboard from './pages/procurement/ProcurementDashboard';
@@ -11,13 +11,24 @@ import SupplierOffers from './pages/procurement/SupplierOffers';
 import SupplierOfferDetail from './pages/procurement/SupplierOfferDetail';
 import PurchaseOrders from './pages/procurement/PurchaseOrders';
 import PurchaseOrderDetail from './pages/procurement/PurchaseOrderDetail';
+import Agenda from './pages/procurement/Agenda';
 import Connectors from './pages/Connectors';
 import SalesIndexImport from './pages/SalesIdexImport';
 import SalesRanking from './pages/SalesRanking';
 import ComparativeAnalysis from './pages/ComparativeAnalysis';
+import UserManagement from './pages/admin/UserManagement';
+import SystemVariablesConfig from './pages/procurement/SystemVariablesConfig';
+import DirectReplenishment from './pages/procurement/DirectReplenishment';
+import BodegonPropuesta from './pages/bodegones/BodegonPropuesta';
+import BodegonDistribucion from './pages/bodegones/BodegonDistribucion';
+import UCPendientes from './pages/bodegones/UCPendientes';
+import ProveedoresBodegon from './pages/bodegones/ProveedoresBodegon';
+import FFPropuesta from './pages/ff/FFPropuesta';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import { apiAuthRefreshToken } from '@/api/apiAuthClient';
 import Login from '@/pages/Login';
 import { missingSupabaseEnvVars } from '@/api/supabaseClient';
+import { useEffect } from 'react';
 
 
 const ConfigurationRequired = ({ message }) => (
@@ -54,6 +65,13 @@ const LayoutWrapper = ({ children, currentPageName }) => Layout ?
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError } = useAuth();
 
+  // Renueva el token al montar y cada 3 min (el token expira en ~5 min)
+  useEffect(() => {
+    apiAuthRefreshToken().catch(() => {});
+    const id = setInterval(() => { apiAuthRefreshToken().catch(() => {}); }, 3 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {
     return (
@@ -74,6 +92,7 @@ const AuthenticatedApp = () => {
 
   // Render the main app
   return (
+    <>
     <Routes>
       <Route path="/" element={
         <LayoutWrapper currentPageName={mainPageKey}>
@@ -97,13 +116,23 @@ const AuthenticatedApp = () => {
       <Route path="/SalesRanking" element={<LayoutWrapper currentPageName="SalesRanking"><SalesRanking /></LayoutWrapper>} />
       <Route path="/ComparativeAnalysis" element={<LayoutWrapper currentPageName="ComparativeAnalysis"><ComparativeAnalysis /></LayoutWrapper>} />
       <Route path="/procurement/Suppliers" element={<LayoutWrapper currentPageName="procurement/Suppliers"><Suppliers /></LayoutWrapper>} />
+      <Route path="/procurement/Agenda" element={<LayoutWrapper currentPageName="procurement/Agenda"><Agenda /></LayoutWrapper>} />
       <Route path="/procurement/ProcurementDashboard" element={<LayoutWrapper currentPageName="procurement/ProcurementDashboard"><ProcurementDashboard /></LayoutWrapper>} />
       <Route path="/procurement/SupplierOffers" element={<LayoutWrapper currentPageName="procurement/SupplierOffers"><SupplierOffers /></LayoutWrapper>} />
       <Route path="/procurement/SupplierOfferDetail/:id" element={<LayoutWrapper currentPageName="procurement/SupplierOfferDetail"><SupplierOfferDetail /></LayoutWrapper>} />
       <Route path="/procurement/PurchaseOrders" element={<LayoutWrapper currentPageName="procurement/PurchaseOrders"><PurchaseOrders /></LayoutWrapper>} />
       <Route path="/procurement/PurchaseOrderDetail/:id" element={<LayoutWrapper currentPageName="procurement/PurchaseOrderDetail"><PurchaseOrderDetail /></LayoutWrapper>} />
+      <Route path="/admin/UserManagement" element={<LayoutWrapper currentPageName="admin/UserManagement"><UserManagement /></LayoutWrapper>} />
+      <Route path="/procurement/VariablesGlobales" element={<LayoutWrapper currentPageName="procurement/VariablesGlobales"><SystemVariablesConfig /></LayoutWrapper>} />
+      <Route path="/procurement/DirectReplenishment" element={<LayoutWrapper currentPageName="procurement/DirectReplenishment"><DirectReplenishment /></LayoutWrapper>} />
+      <Route path="/bodegones/Propuesta" element={<LayoutWrapper currentPageName="bodegones/Propuesta"><BodegonPropuesta /></LayoutWrapper>} />
+      <Route path="/bodegones/Distribucion" element={<LayoutWrapper currentPageName="bodegones/Distribucion"><BodegonDistribucion /></LayoutWrapper>} />
+      <Route path="/bodegones/UCPendientes" element={<LayoutWrapper currentPageName="bodegones/UCPendientes"><UCPendientes /></LayoutWrapper>} />
+      <Route path="/bodegones/ProveedoresBodegon" element={<LayoutWrapper currentPageName="bodegones/ProveedoresBodegon"><ProveedoresBodegon /></LayoutWrapper>} />
+      <Route path="/ff/Propuesta" element={<LayoutWrapper currentPageName="ff/Propuesta"><FFPropuesta /></LayoutWrapper>} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
+    </>
   );
 };
 

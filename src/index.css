@@ -84,9 +84,11 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+  html { scroll-behavior: smooth; }
+  ::selection { background: hsl(var(--primary) / 0.22); }
 }
 
 /* Custom scrollbar */
@@ -108,4 +110,65 @@
 /* Table styles */
 .data-table th {
   @apply text-xs font-semibold uppercase tracking-wider text-muted-foreground;
+}
+
+/* ── Capa visual: transiciones, sombras de color y brillos suaves ───────────── */
+@layer utilities {
+  /* Fondo del área de contenido: degradado muy suave, sin distraer de las tablas */
+  .app-surface {
+    background-image:
+      radial-gradient(900px 380px at 100% -10%, hsl(var(--primary) / 0.07), transparent 60%),
+      radial-gradient(700px 320px at -10% 0%, hsl(var(--accent) / 0.05), transparent 60%);
+    background-attachment: local;
+  }
+  /* Tarjeta que se eleva al pasar el cursor (KPIs, accesos, listas de tarjetas; no para tablas grandes) */
+  .hover-lift {
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px -8px hsl(var(--primary) / 0.25), 0 2px 6px -2px hsl(var(--foreground) / 0.08);
+    border-color: hsl(var(--primary) / 0.35);
+  }
+  /* Borde con degradado de marca */
+  .gradient-border {
+    border: 1px solid transparent;
+    background:
+      linear-gradient(hsl(var(--card)), hsl(var(--card))) padding-box,
+      linear-gradient(135deg, hsl(var(--primary) / 0.55), hsl(var(--accent) / 0.55)) border-box;
+  }
+  /* Texto con degradado de marca */
+  .text-gradient {
+    background-image: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent)));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  /* Entrada escalonada de los hijos de una lista o rejilla */
+  .stagger > * { animation: rise-in .4s cubic-bezier(.2,.7,.2,1) both; }
+  .stagger > *:nth-child(1) { animation-delay: .02s; } .stagger > *:nth-child(2) { animation-delay: .06s; }
+  .stagger > *:nth-child(3) { animation-delay: .10s; } .stagger > *:nth-child(4) { animation-delay: .14s; }
+  .stagger > *:nth-child(5) { animation-delay: .18s; } .stagger > *:nth-child(6) { animation-delay: .22s; }
+  .stagger > *:nth-child(n+7) { animation-delay: .26s; }
+  .page-enter { animation: rise-in .35s cubic-bezier(.2,.7,.2,1) both; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pop {
+  0%   { transform: scale(.6); opacity: 0; }
+  70%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--destructive) / 0.5); }
+  50%      { box-shadow: 0 0 0 5px hsl(var(--destructive) / 0); }
+}
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
